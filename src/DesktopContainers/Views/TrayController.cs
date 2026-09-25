@@ -24,7 +24,7 @@ public sealed class TrayController : IDisposable
         _icon = new System.Windows.Forms.NotifyIcon
         {
             Icon = BrandIcon.CreateIcon(),
-            Text = "桌面容器",
+            Text = Brand.Name,
             Visible = true,
             ContextMenuStrip = menu
         };

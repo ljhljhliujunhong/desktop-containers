@@ -67,7 +67,7 @@ public partial class ManagerWindow
             host.MouseLeftButtonUp += (_, _) =>
             {
                 _selectedThemeId = id;
-                _draft = appearance.Clone();
+                _draft = AppHost.State.ThemeAppearance(id).Clone();
                 Navigate("themes");
             };
             themes.Children.Add(host);
@@ -81,115 +81,223 @@ public partial class ManagerWindow
 
     UIElement BuildContainers()
     {
-        var page = UiKit.Header("容器", UiKit.Button("新建", CreateContainer, ButtonKind.Primary));
         var containers = AppHost.State.Document.Containers;
+        var root = new Grid { Margin = new Thickness(28, 22, 16, 22) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var header = UiKit.Header("容器", UiKit.Button("新建", CreateContainer, ButtonKind.Primary));
+        root.Children.Add(header);
+
         if (containers.Count == 0)
         {
-            page.Children.Add(UiKit.Text("还没有容器", 15, FontWeights.Normal, Paint.Muted));
-            return page;
+            var empty = UiKit.Text("还没有容器", 15, FontWeights.Normal, Paint.Muted);
+            Grid.SetRow(empty, 1);
+            root.Children.Add(empty);
+            return root;
         }
 
+        var selected = containers.FirstOrDefault(item => item.Id == _focusContainerId) ?? containers[0];
+        _focusContainerId = selected.Id;
+
+        var body = new Grid();
+        Grid.SetRow(body, 1);
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(248) });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) });
+        body.ColumnDefinitions.Add(new ColumnDefinition());
+
+        var list = new StackPanel();
         foreach (var container in containers)
+            list.Children.Add(ContainerPick(container, container.Id == selected.Id));
+        var listScroll = new ScrollViewer
         {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(210) });
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            var preview = PreviewCard.Create(container.Appearance, container.Name, container.Apps.Count + " 个", container.Apps, 190, 132);
-            preview.VerticalAlignment = VerticalAlignment.Top;
-            var info = new StackPanel { Margin = new Thickness(8, 0, 0, 0) };
-            info.Children.Add(UiKit.Text(container.Name, 18, FontWeights.SemiBold, Paint.Ink));
-            info.Children.Add(UiKit.Text(container.Apps.Count + " 个", 12, FontWeights.Normal, Paint.Muted));
+            Content = list,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled
+        };
+        body.Children.Add(listScroll);
 
-            var actions = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
-            var index = containers.IndexOf(container);
-            actions.Children.Add(Small("上移", () => { AppHost.State.MoveContainer(container, -1); Navigate("containers"); }, index > 0));
-            actions.Children.Add(Small("下移", () => { AppHost.State.MoveContainer(container, 1); Navigate("containers"); }, index < containers.Count - 1));
-            actions.Children.Add(Small("重命名", () =>
-            {
-                var name = MiniDialog.Prompt(this, "重命名", container.Name);
-                if (name == null) return;
-                AppHost.State.Rename(container, name);
-                Navigate("containers");
-            }, true));
-            actions.Children.Add(Small("外观", () => Open("themes", container.Id), true));
-            actions.Children.Add(Small("删除", () => DeleteContainer(container), true));
-            info.Children.Add(actions);
+        var detailScroll = new ScrollViewer
+        {
+            Content = ContainerDetail(selected, containers),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Padding = new Thickness(0, 0, 12, 8)
+        };
+        Grid.SetColumn(detailScroll, 2);
+        body.Children.Add(detailScroll);
+        root.Children.Add(body);
+        return root;
+    }
 
-            var (sizeRow, sizeSlider) = UiKit.SliderRow("图标", 32, 96, container.IconSize);
-            sizeSlider.ValueChanged += (_, _) =>
-            {
-                container.IconSize = sizeSlider.Value;
-                container.UpdatedUtc = DateTime.UtcNow;
-                AppHost.State.RequestSave();
-            };
-            info.Children.Add(sizeRow);
-            info.Children.Add(UiKit.ToggleRow("显示名称", container.ShowNames, on =>
-            {
-                container.ShowNames = on;
-                AppHost.State.Flush();
-            }));
-            info.Children.Add(UiKit.ToggleRow("显示标题", container.ShowTitle, on =>
-            {
-                container.ShowTitle = on;
-                AppHost.State.Flush();
-            }));
-            info.Children.Add(UiKit.ToggleRow("锁定", container.Locked, on =>
-            {
-                container.Locked = on;
-                AppHost.State.Flush();
-            }));
+    UIElement ContainerPick(ContainerModel container, bool selected)
+    {
+        var row = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        var mark = new Border
+        {
+            Width = 4,
+            Height = 28,
+            CornerRadius = new CornerRadius(2),
+            Background = Paint.Brush(selected ? Paint.Accent : Colors.Transparent),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0)
+        };
+        var text = new StackPanel { Margin = new Thickness(12, 10, 12, 10) };
+        text.Children.Add(UiKit.Text(container.Name, 14, selected ? FontWeights.SemiBold : FontWeights.Normal, Paint.Ink));
+        text.Children.Add(UiKit.Text(container.Apps.Count + " 个", 12, FontWeights.Normal, Paint.Muted));
+        Grid.SetColumn(text, 1);
+        row.Children.Add(mark);
+        row.Children.Add(text);
+        var card = new Border
+        {
+            Child = row,
+            CornerRadius = new CornerRadius(12),
+            Background = Paint.Brush(selected ? Color.FromRgb(0xFF, 0xE4, 0xF1) : Colors.Transparent),
+            Cursor = Cursors.Hand,
+            Margin = new Thickness(0, 0, 8, 4)
+        };
+        var id = container.Id;
+        card.MouseLeftButtonUp += (_, _) =>
+        {
+            if (_focusContainerId == id) return;
+            _focusContainerId = id;
+            AppHost.FindWindow(id)?.Nudge();
+            Navigate("containers");
+        };
+        return card;
+    }
 
-            var places = new WrapPanel { Margin = new Thickness(0, 4, 0, 8) };
-            places.Children.Add(PlaceButton(container, "上", TitlePlacement.Top));
-            places.Children.Add(PlaceButton(container, "下", TitlePlacement.Bottom));
-            places.Children.Add(PlaceButton(container, "左上", TitlePlacement.TopLeft));
-            places.Children.Add(PlaceButton(container, "居中", TitlePlacement.Center));
-            info.Children.Add(places);
+    UIElement ContainerDetail(ContainerModel container, System.Collections.ObjectModel.ObservableCollection<ContainerModel> containers)
+    {
+        var page = new StackPanel();
+        var top = new Grid();
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+        top.ColumnDefinitions.Add(new ColumnDefinition());
+        var preview = PreviewCard.Create(container.Appearance, container.Name, container.Apps.Count + " 个", container.Apps, 200, 140);
+        preview.VerticalAlignment = VerticalAlignment.Top;
+        var previewHost = new Border { Child = preview, VerticalAlignment = VerticalAlignment.Top };
+        var info = new StackPanel { Margin = new Thickness(16, 0, 0, 0) };
+        info.Children.Add(UiKit.Text(container.Name, 22, FontWeights.SemiBold, Paint.Ink));
+        info.Children.Add(UiKit.Text(container.Apps.Count + " 个", 13, FontWeights.Normal, Paint.Muted));
+        var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+        var index = containers.IndexOf(container);
+        actions.Children.Add(Small("上移", () => { AppHost.State.MoveContainer(container, -1); Navigate("containers"); }, index > 0));
+        actions.Children.Add(Small("下移", () => { AppHost.State.MoveContainer(container, 1); Navigate("containers"); }, index < containers.Count - 1));
+        actions.Children.Add(Small("重命名", () =>
+        {
+            var name = MiniDialog.Prompt(this, "重命名", container.Name);
+            if (name == null) return;
+            AppHost.State.Rename(container, name);
+            Navigate("containers");
+        }, true));
+        actions.Children.Add(Small("删除", () => DeleteContainer(container), true));
+        info.Children.Add(actions);
+        top.Children.Add(previewHost);
+        Grid.SetColumn(info, 1);
+        top.Children.Add(info);
+        page.Children.Add(UiKit.Card(top, new Thickness(16)));
 
-            if (container.Apps.Count > 0)
-            {
-                info.Children.Add(UiKit.Text("里面的应用", 13, FontWeights.SemiBold, Paint.Ink));
-                foreach (var app in container.Apps.ToList())
-                {
-                    var line = new Grid { Margin = new Thickness(0, 6, 0, 0) };
-                    line.ColumnDefinitions.Add(new ColumnDefinition());
-                    line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    var label = UiKit.Text(app.Missing ? app.DisplayName + "  找不到" : app.DisplayName, 13, FontWeights.Normal, app.Missing ? Paint.Muted : Paint.Ink);
-                    label.VerticalAlignment = VerticalAlignment.Center;
-                    var ops = new StackPanel { Orientation = Orientation.Horizontal };
-                    if (app.Missing)
-                        ops.Children.Add(Small("移除", () => { AppHost.State.RemoveMissing(container, app); Navigate("containers"); }, true));
-                    else
-                        ops.Children.Add(Small("移出", () =>
-                        {
-                            if (!AppHost.State.RestoreApp(container, app))
-                                MiniDialog.Alert(this, "没能移出", "快捷方式还在容器里。");
-                            else
-                                Navigate("containers");
-                        }, !container.Locked));
-                    if (containers.Count > 1 && !container.Locked)
-                        ops.Children.Add(MoveButton(container, app));
-                    Grid.SetColumn(ops, 1);
-                    line.Children.Add(label);
-                    line.Children.Add(ops);
-                    info.Children.Add(line);
-                }
-            }
+        var options = new StackPanel();
+        options.Children.Add(SizeChoices("图标", container.IconSize, size =>
+        {
+            container.IconSize = size;
+            container.UpdatedUtc = DateTime.UtcNow;
+            AppHost.State.RequestSave();
+        }));
+        options.Children.Add(UiKit.ToggleRow("显示名称", container.ShowNames, on =>
+        {
+            container.ShowNames = on;
+            AppHost.State.Flush();
+        }));
+        options.Children.Add(UiKit.ToggleRow("显示标题", container.ShowTitle, on =>
+        {
+            container.ShowTitle = on;
+            AppHost.State.Flush();
+        }));
+        options.Children.Add(UiKit.ToggleRow("锁定", container.Locked, on =>
+        {
+            container.Locked = on;
+            AppHost.State.Flush();
+        }));
+        var places = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+        places.Children.Add(PlaceButton(container, "上", TitlePlacement.Top));
+        places.Children.Add(PlaceButton(container, "下", TitlePlacement.Bottom));
+        places.Children.Add(PlaceButton(container, "左上", TitlePlacement.TopLeft));
+        places.Children.Add(PlaceButton(container, "居中", TitlePlacement.Center));
+        options.Children.Add(places);
+        AppendAppearanceEditors(options, container.Appearance, () =>
+        {
+            container.UpdatedUtc = DateTime.UtcNow;
+            AppHost.State.RequestSave();
+            previewHost.Child = PreviewCard.Create(container.Appearance, container.Name, container.Apps.Count + " 个", container.Apps, 200, 140);
+        });
+        var optionCard = UiKit.Card(options, new Thickness(16, 12, 16, 12));
+        optionCard.Margin = new Thickness(0, 12, 0, 0);
+        page.Children.Add(optionCard);
 
-            row.Children.Add(preview);
-            Grid.SetColumn(info, 1);
-            row.Children.Add(info);
-            var card = UiKit.Card(row, new Thickness(14));
-            card.Margin = new Thickness(0, 0, 0, 14);
-            if (container.Id == _focusContainerId)
-                card.BorderBrush = Paint.Brush(Paint.Accent);
-            page.Children.Add(card);
+        var apps = new StackPanel();
+        apps.Children.Add(UiKit.Text("里面的应用", 15, FontWeights.SemiBold, Paint.Ink));
+        if (container.Apps.Count == 0)
+        {
+            var empty = UiKit.Text("还是空的", 13, FontWeights.Normal, Paint.Muted);
+            empty.Margin = new Thickness(0, 10, 0, 0);
+            apps.Children.Add(empty);
         }
+        else
+        {
+            var appIndex = 0;
+            foreach (var app in container.Apps.ToList())
+            {
+                var line = new Grid { Margin = new Thickness(0, 8, 0, 0) };
+                line.ColumnDefinitions.Add(new ColumnDefinition());
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var label = UiKit.Text(app.Missing ? app.DisplayName + "  找不到" : app.DisplayName, 13, FontWeights.Normal, app.Missing ? Paint.Muted : Paint.Ink);
+                label.VerticalAlignment = VerticalAlignment.Center;
+                var ops = new StackPanel { Orientation = Orientation.Horizontal };
+                var at = appIndex;
+                if (!app.Missing && !container.Locked)
+                {
+                    ops.Children.Add(Small("上移", () =>
+                    {
+                        AppHost.State.ShiftApp(container, app, -1);
+                        Navigate("containers");
+                    }, at > 0));
+                    ops.Children.Add(Small("下移", () =>
+                    {
+                        AppHost.State.ShiftApp(container, app, 1);
+                        Navigate("containers");
+                    }, at < container.Apps.Count - 1));
+                }
+                if (app.Missing)
+                    ops.Children.Add(Small("移除", () => { AppHost.State.RemoveMissing(container, app); Navigate("containers"); }, true));
+                else
+                    ops.Children.Add(Small("移出", () =>
+                    {
+                        if (!AppHost.State.RestoreApp(container, app))
+                            MiniDialog.Alert(this, "没能移出", "快捷方式还在容器里。");
+                        else
+                            Navigate("containers");
+                    }, !container.Locked));
+                if (containers.Count > 1 && !container.Locked && !app.Missing)
+                    ops.Children.Add(MoveButton(container, app));
+                Grid.SetColumn(ops, 1);
+                line.Children.Add(label);
+                line.Children.Add(ops);
+                apps.Children.Add(line);
+                appIndex++;
+            }
+        }
+        var appCard = UiKit.Card(apps, new Thickness(16));
+        appCard.Margin = new Thickness(0, 12, 0, 0);
+        page.Children.Add(appCard);
         return page;
     }
 
     UIElement BuildThemes()
     {
+        _draft = AppHost.State.ThemeAppearance(_selectedThemeId).Clone();
+        _themeFrames.Clear();
         var root = new Grid { Margin = new Thickness(28, 18, 28, 18) };
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(340) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(22) });
@@ -198,15 +306,7 @@ public partial class ManagerWindow
         var left = new StackPanel();
         left.Children.Add(Section("预设"));
         left.Children.Add(ThemeWrap(ThemeCatalog.BuiltIns));
-        left.Children.Add(Section("我的"));
-        if (AppHost.State.Document.CustomThemes.Count == 0)
-            left.Children.Add(UiKit.Text("还没有自己的主题", 13, FontWeights.Normal, Paint.Muted));
-        else
-            left.Children.Add(ThemeWrap(AppHost.State.Document.CustomThemes));
-        var save = UiKit.Button("存成主题", SaveTheme, ButtonKind.Primary);
-        save.HorizontalAlignment = HorizontalAlignment.Left;
-        save.Margin = new Thickness(0, 8, 0, 0);
-        left.Children.Add(save);
+        left.Children.Add(MineBlock());
 
         var right = new StackPanel();
         _previewHost = new Border { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 0, 0, 12) };
@@ -249,8 +349,7 @@ public partial class ManagerWindow
         {
             if (_loadingDraft) return;
             _draft.Shadow = on;
-            UpdatePreview();
-            LiveApply();
+            RememberThemeDraft();
         });
         var shadowRow = new Grid { Margin = new Thickness(0, 8, 0, 8) };
         shadowRow.ColumnDefinitions.Add(new ColumnDefinition());
@@ -262,63 +361,31 @@ public partial class ManagerWindow
         shadowRow.Children.Add(_shadowSwitch);
         right.Children.Add(shadowRow);
 
-        right.Children.Add(Section("用在"));
-        _containerChecks.Clear();
-        if (AppHost.State.Document.Containers.Count == 0)
-        {
-            right.Children.Add(UiKit.Text("还没有容器", 13, FontWeights.Normal, Paint.Muted));
-        }
-        else
-        {
-            var checks = new WrapPanel();
-            foreach (var container in AppHost.State.Document.Containers)
-            {
-                var id = container.Id;
-                var box = new CheckBox
-                {
-                    Content = container.Name,
-                    Tag = id,
-                    IsChecked = _checked.Contains(id),
-                    FontFamily = UiKit.Font,
-                    Foreground = Paint.Brush(Paint.Ink),
-                    Margin = new Thickness(0, 4, 16, 4),
-                    VerticalContentAlignment = VerticalAlignment.Center
-                };
-                box.Checked += (_, _) =>
-                {
-                    if (_suppressCheckEvents) return;
-                    _checked.Add(id);
-                };
-                box.Unchecked += (_, _) =>
-                {
-                    if (_suppressCheckEvents) return;
-                    _checked.Remove(id);
-                    if (_focusContainerId == id) _focusContainerId = null;
-                };
-                _containerChecks.Add(box);
-                checks.Children.Add(box);
-            }
-            right.Children.Add(checks);
-        }
-
         var applyRow = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-        applyRow.Children.Add(Pad(UiKit.Button("用到勾选的容器", ApplyChecked, ButtonKind.Primary)));
         applyRow.Children.Add(Pad(UiKit.Button("设为默认", () =>
         {
             if (!string.IsNullOrWhiteSpace(_selectedThemeId))
                 AppHost.State.SetDefaultTheme(_selectedThemeId);
         }, ButtonKind.Soft)));
         applyRow.Children.Add(Pad(UiKit.Button("用这个新建", CreateFromDraft, ButtonKind.Soft)));
-        var custom = AppHost.State.Document.CustomThemes.FirstOrDefault(theme => theme.Id == _selectedThemeId);
-        if (custom != null)
-            applyRow.Children.Add(Pad(UiKit.Button("更新这个主题", () =>
-            {
-                AppHost.State.UpdateCustomTheme(custom.Id, _draft);
-                Navigate("themes");
-            }, ButtonKind.Soft)));
+        _updateThemeButton = UiKit.Button("更新这个主题", () =>
+        {
+            if (string.IsNullOrWhiteSpace(_selectedThemeId)) return;
+            if (AppHost.State.Document.CustomThemes.All(theme => theme.Id != _selectedThemeId)) return;
+            AppHost.State.UpdateCustomTheme(_selectedThemeId, _draft);
+            Navigate("themes");
+        }, ButtonKind.Soft);
+        applyRow.Children.Add(Pad(_updateThemeButton));
         right.Children.Add(applyRow);
+        PaintThemeFrames();
 
-        var leftScroll = new ScrollViewer { Content = left, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        var leftScroll = new ScrollViewer
+        {
+            Content = left,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Padding = new Thickness(0, 0, 6, 12)
+        };
         var rightScroll = new ScrollViewer { Content = right, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
         Grid.SetColumn(rightScroll, 2);
         root.Children.Add(leftScroll);
@@ -348,13 +415,7 @@ public partial class ManagerWindow
             state.Flush();
         }));
         card.Children.Add(UiKit.ToggleRow("编辑桌面", state.Settings.EditMode, AppHost.SetEditMode));
-        var (sliderRow, slider) = UiKit.SliderRow("默认图标", 32, 96, state.Settings.DefaultIconSize);
-        slider.ValueChanged += (_, _) =>
-        {
-            state.Settings.DefaultIconSize = slider.Value;
-            state.RequestSave();
-        };
-        card.Children.Add(sliderRow);
+        card.Children.Add(NewIconSizeRow());
         page.Children.Add(UiKit.Card(card));
 
         page.Children.Add(Section("默认主题"));
@@ -367,10 +428,10 @@ public partial class ManagerWindow
                 Padding = new Thickness(3),
                 Margin = new Thickness(0, 0, 10, 10),
                 CornerRadius = new CornerRadius(16),
-                BorderThickness = new Thickness(selected ? 2 : 0),
-                BorderBrush = Paint.Brush(Paint.Accent),
+                BorderThickness = new Thickness(2),
+                BorderBrush = Paint.Brush(selected ? Paint.Accent : Color.FromArgb(0, 0, 0, 0)),
                 Cursor = Cursors.Hand,
-                Child = PreviewCard.Create(theme.Appearance, theme.Name, selected ? "默认" : "", null, 140, 90)
+                Child = PreviewCard.Create(state.ThemeAppearance(theme.Id), theme.Name, selected ? "默认" : "", null, 140, 90)
             };
             var id = theme.Id;
             frame.MouseLeftButtonUp += (_, _) =>
@@ -383,8 +444,8 @@ public partial class ManagerWindow
         page.Children.Add(themes);
 
         var files = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        files.Children.Add(Pad(UiKit.Button("备份布局", Backup, ButtonKind.Soft)));
-        files.Children.Add(Pad(UiKit.Button("恢复布局", Restore, ButtonKind.Soft)));
+        files.Children.Add(Pad(UiKit.Button("导出备份", Backup, ButtonKind.Soft)));
+        files.Children.Add(Pad(UiKit.Button("导入备份", Restore, ButtonKind.Soft)));
         page.Children.Add(files);
         return page;
     }
@@ -414,35 +475,9 @@ public partial class ManagerWindow
     {
         var name = MiniDialog.Prompt(this, "容器名称", "新容器", "创建");
         if (name == null) return;
-        AppHost.State.CreateContainer(name, _selectedThemeId, _draft, true);
+        var created = AppHost.State.CreateContainer(name, _selectedThemeId, _draft, true);
+        _focusContainerId = created.Id;
         Navigate("containers");
-    }
-
-    void ApplyChecked()
-    {
-        var ids = TargetContainers();
-        if (ids.Count == 0)
-        {
-            MiniDialog.Alert(this, "还没选容器", "先勾选要换外观的容器。");
-            return;
-        }
-        foreach (var id in ids) _checked.Add(id);
-        AppHost.State.ApplyAppearance(ids, _draft, _selectedThemeId);
-    }
-
-    List<string> TargetContainers()
-    {
-        var ids = _containerChecks
-            .Where(box => box.IsChecked == true && box.Tag is string)
-            .Select(box => (string)box.Tag)
-            .Distinct()
-            .ToList();
-        if (ids.Count > 0) return ids;
-        if (!string.IsNullOrWhiteSpace(_focusContainerId) && AppHost.State.Find(_focusContainerId) != null)
-            return [_focusContainerId];
-        var containers = AppHost.State.Document.Containers;
-        if (containers.Count == 1) return [containers[0].Id];
-        return [];
     }
 
     void ApplySwatch(string hex)
@@ -453,6 +488,7 @@ public partial class ManagerWindow
         _draft.BorderColor = Paint.ToHex(Paint.MixWhite(color, 0.35));
         _draft.TitleColor = Paint.ToHex(Paint.Darken(color, 0.45));
         PushDraft();
+        RememberThemeDraft();
     }
 
     void PushDraft()
@@ -474,12 +510,39 @@ public partial class ManagerWindow
         UpdatePreview();
     }
 
-    void LiveApply()
+    void RememberThemeDraft()
     {
-        var ids = TargetContainers();
-        if (ids.Count == 0) return;
-        AppHost.State.PreviewAppearance(ids, _draft);
+        if (string.IsNullOrWhiteSpace(_selectedThemeId)) return;
+        AppHost.State.SaveThemeEdit(_selectedThemeId, _draft);
+        if (_themeFrames.TryGetValue(_selectedThemeId, out var frame))
+        {
+            var theme = ThemeCatalog.Find(_selectedThemeId, AppHost.State.Document.CustomThemes);
+            frame.Child = ThemeThumb(_draft, theme?.Name ?? "自定义", theme?.BuiltIn != false ? "" : "我的");
+        }
+        UpdatePreview();
     }
+
+    void ChooseTheme(ThemeDefinition item)
+    {
+        _selectedThemeId = item.Id;
+        _draft = AppHost.State.ThemeAppearance(item.Id).Clone();
+        PaintThemeFrames();
+        PushDraft();
+    }
+
+    void PaintThemeFrames()
+    {
+        foreach (var (id, frame) in _themeFrames)
+            frame.BorderBrush = Paint.Brush(id == _selectedThemeId ? Paint.Accent : Color.FromArgb(0, 0, 0, 0));
+        if (_updateThemeButton != null)
+        {
+            var custom = AppHost.State.Document.CustomThemes.Any(theme => theme.Id == _selectedThemeId);
+            _updateThemeButton.Visibility = custom ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    static Border ThemeThumb(Appearance appearance, string title, string subtitle) =>
+        PreviewCard.Create(appearance, title, subtitle, null, 132, 86);
 
     void UpdatePreview()
     {
@@ -490,49 +553,150 @@ public partial class ManagerWindow
 
     UIElement ThemeWrap(IEnumerable<ThemeDefinition> themes)
     {
-        var wrap = new WrapPanel();
+        var grid = new UniformGrid { Columns = 2 };
         foreach (var theme in themes)
         {
-            var selected = theme.Id == _selectedThemeId;
+            var item = theme;
             var frame = new Border
             {
-                Padding = new Thickness(3),
-                Margin = new Thickness(0, 0, 10, 10),
-                CornerRadius = new CornerRadius(16),
-                BorderThickness = new Thickness(selected ? 2 : 0),
-                BorderBrush = Paint.Brush(Paint.Accent),
+            Margin = new Thickness(4),
+            Padding = new Thickness(3),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            CornerRadius = new CornerRadius(16),
+                BorderThickness = new Thickness(2),
                 Cursor = Cursors.Hand,
-                Child = PreviewCard.Create(theme.Appearance, theme.Name, theme.BuiltIn ? "" : "我的", null, 148, 96)
+                Child = ThemeThumb(AppHost.State.ThemeAppearance(item.Id), item.Name, item.BuiltIn ? "" : "我的")
             };
-            var item = theme;
-            frame.MouseLeftButtonUp += (_, _) =>
+            frame.MouseLeftButtonUp += (_, _) => ChooseTheme(item);
+            _themeFrames[item.Id] = frame;
+            if (item.BuiltIn)
             {
-                _selectedThemeId = item.Id;
-                _draft = item.Appearance.Clone();
-                Navigate("themes");
-            };
-            if (theme.BuiltIn)
-            {
-                wrap.Children.Add(frame);
+                grid.Children.Add(frame);
                 continue;
             }
-            var stack = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
+            var stack = new StackPanel();
             stack.Children.Add(frame);
             stack.Children.Add(Small("删除", () =>
             {
                 if (!MiniDialog.Confirm(this, "删除「" + item.Name + "」", "已经用过它的容器不会变。", "删除"))
                     return;
                 AppHost.State.DeleteCustomTheme(item.Id);
-                if (_selectedThemeId == item.Id)
-                {
-                    _selectedThemeId = ThemeCatalog.DefaultId;
-                    _draft = ThemeCatalog.CreateAppearance(ThemeCatalog.DefaultId);
-                }
+                SettingsAfterThemeDeleted(item.Id);
                 Navigate("themes");
             }, true));
-            wrap.Children.Add(stack);
+            grid.Children.Add(stack);
         }
-        return wrap;
+        PaintThemeFrames();
+        return grid;
+    }
+
+    void SettingsAfterThemeDeleted(string id)
+    {
+        if (_selectedThemeId != id) return;
+        _selectedThemeId = ThemeCatalog.DefaultId;
+        _draft = AppHost.State.ThemeAppearance(ThemeCatalog.DefaultId).Clone();
+    }
+
+    void AppendAppearanceEditors(Panel parent, Appearance appearance, Action changed)
+    {
+        var loading = false;
+        void Edit(Action change)
+        {
+            if (loading) return;
+            change();
+            changed();
+        }
+
+        var swatches = new WrapPanel { Margin = new Thickness(0, 8, 0, 4) };
+        foreach (var theme in ThemeCatalog.BuiltIns)
+        {
+            var hex = theme.Appearance.Background1;
+            var dot = new Border
+            {
+                Width = 22,
+                Height = 22,
+                Margin = new Thickness(0, 0, 8, 8),
+                CornerRadius = new CornerRadius(11),
+                Background = Paint.Brush(Paint.Hex(hex)),
+                BorderBrush = Paint.Brush(Colors.White),
+                BorderThickness = new Thickness(1),
+                Cursor = Cursors.Hand
+            };
+            dot.MouseLeftButtonUp += (_, _) =>
+            {
+                var color = Paint.Hex(hex);
+                loading = true;
+                appearance.Background1 = Paint.ToHex(color);
+                appearance.Background2 = Paint.ToHex(Paint.MixWhite(color, 0.72));
+                appearance.BorderColor = Paint.ToHex(Paint.MixWhite(color, 0.35));
+                appearance.TitleColor = Paint.ToHex(Paint.Darken(color, 0.45));
+                loading = false;
+                changed();
+                Navigate("containers");
+            };
+            swatches.Children.Add(dot);
+        }
+        parent.Children.Add(swatches);
+
+        parent.Children.Add(LocalColor("背景", () => appearance.Background1, value => Edit(() => appearance.Background1 = value)));
+        parent.Children.Add(LocalColor("背景 2", () => appearance.Background2, value => Edit(() => appearance.Background2 = value)));
+        parent.Children.Add(LocalColor("第三色", () => appearance.Background3 ?? "", value => Edit(() => appearance.Background3 = string.IsNullOrWhiteSpace(value) ? null : value)));
+        parent.Children.Add(LocalColor("边框", () => appearance.BorderColor, value => Edit(() => appearance.BorderColor = value)));
+        parent.Children.Add(LocalColor("标题", () => appearance.TitleColor, value => Edit(() => appearance.TitleColor = value)));
+        parent.Children.Add(LocalSlider("透明度", 0, 1, appearance.BackgroundOpacity, value => Edit(() => appearance.BackgroundOpacity = value), true));
+        parent.Children.Add(LocalSlider("边框透", 0, 1, appearance.BorderOpacity, value => Edit(() => appearance.BorderOpacity = value), true));
+        parent.Children.Add(LocalSlider("圆角", 8, 40, appearance.CornerRadius, value => Edit(() => appearance.CornerRadius = value), false));
+        parent.Children.Add(LocalSlider("标题字", 12, 28, appearance.TitleSize, value => Edit(() => appearance.TitleSize = value), false));
+        parent.Children.Add(LocalSlider("内边距", 8, 32, appearance.Padding, value => Edit(() => appearance.Padding = value), false));
+        parent.Children.Add(LocalSlider("图标距", 2, 28, appearance.IconGap, value => Edit(() => appearance.IconGap = value), false));
+        var shadow = new ToggleSwitch(appearance.Shadow, on => Edit(() => appearance.Shadow = on));
+        var row = new Grid { Margin = new Thickness(0, 8, 0, 4) };
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var label = UiKit.Text("阴影", 13, FontWeights.Normal, Paint.Ink);
+        label.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(shadow, 1);
+        row.Children.Add(label);
+        row.Children.Add(shadow);
+        parent.Children.Add(row);
+    }
+
+    UIElement LocalColor(string label, Func<string> get, Action<string> set)
+    {
+        var grid = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        var caption = UiKit.Text(label, 13, FontWeights.Normal, Paint.Ink);
+        caption.VerticalAlignment = VerticalAlignment.Center;
+        var (chrome, input) = UiKit.Field(get());
+        input.TextChanged += (_, _) =>
+        {
+            var text = input.Text.Trim();
+            if (label == "第三色" && text.Length == 0)
+            {
+                set("");
+                return;
+            }
+            if (Paint.TryHex(text) == null) return;
+            if (!text.StartsWith('#')) text = "#" + text;
+            if (string.Equals(text, get(), StringComparison.OrdinalIgnoreCase)) return;
+            set(text);
+        };
+        Grid.SetColumn(chrome, 1);
+        grid.Children.Add(caption);
+        grid.Children.Add(chrome);
+        return grid;
+    }
+
+    UIElement LocalSlider(string label, double min, double max, double value, Action<double> set, bool fine)
+    {
+        var (row, slider) = UiKit.SliderRow(label, min, max, value, fine);
+        slider.ValueChanged += (_, _) =>
+        {
+            if (Math.Abs(slider.Value - value) < (fine ? 0.0001 : 0.01) && slider.Value == value) return;
+            set(slider.Value);
+        };
+        return row;
     }
 
     UIElement ColorRow(string label, string value, Action<string> set, out TextBox box)
@@ -551,15 +715,13 @@ public partial class ManagerWindow
             if (label == "第三色" && text.Length == 0)
             {
                 set("");
-                UpdatePreview();
-                LiveApply();
+                RememberThemeDraft();
                 return;
             }
             if (Paint.TryHex(text) == null) return;
             if (!text.StartsWith('#')) text = "#" + text;
             set(text);
-            UpdatePreview();
-            LiveApply();
+            RememberThemeDraft();
         };
         Grid.SetColumn(chrome, 1);
         grid.Children.Add(caption);
@@ -575,8 +737,7 @@ public partial class ManagerWindow
         {
             if (_loadingDraft) return;
             set(created.Value);
-            UpdatePreview();
-            LiveApply();
+            RememberThemeDraft();
         };
         return row;
     }
@@ -635,6 +796,79 @@ public partial class ManagerWindow
         return button;
     }
 
+    UIElement MineBlock()
+    {
+        var body = new StackPanel();
+        body.Children.Add(UiKit.Text("我的", 16, FontWeights.SemiBold, Paint.Ink));
+        if (AppHost.State.Document.CustomThemes.Count == 0)
+        {
+            var empty = UiKit.Text("还没有自己的主题", 13, FontWeights.Normal, Paint.Muted);
+            empty.Margin = new Thickness(0, 10, 0, 0);
+            body.Children.Add(empty);
+        }
+        else
+        {
+            var wrap = ThemeWrap(AppHost.State.Document.CustomThemes);
+            if (wrap is FrameworkElement element)
+                element.Margin = new Thickness(-4, 8, -4, 0);
+            body.Children.Add(wrap);
+        }
+        var save = UiKit.Button("存成主题", SaveTheme, ButtonKind.Primary);
+        save.HorizontalAlignment = HorizontalAlignment.Left;
+        save.Margin = new Thickness(0, 16, 0, 0);
+        body.Children.Add(save);
+        var card = UiKit.Card(body, new Thickness(16, 14, 16, 16));
+        card.Margin = new Thickness(4, 22, 8, 8);
+        return card;
+    }
+
+    UIElement NewIconSizeRow()
+    {
+        var state = AppHost.State;
+        return SizeChoices("新容器图标", state.Settings.DefaultIconSize, size =>
+        {
+            state.Settings.DefaultIconSize = size;
+            state.RequestSave();
+        });
+    }
+
+    UIElement SizeChoices(string label, double current, Action<double> pick)
+    {
+        var options = new (string Label, double Size)[] { ("小", 40), ("中", 56), ("大", 80) };
+        var selected = options.OrderBy(option => Math.Abs(current - option.Size)).First().Size;
+        var buttons = new Dictionary<double, Button>();
+        void MarkChosen()
+        {
+            foreach (var (size, button) in buttons)
+                button.BorderBrush = Paint.Brush(Math.Abs(size - selected) < 0.5 ? Paint.Accent : Paint.Line);
+        }
+
+        var grid = new Grid { Margin = new Thickness(0, 6, 0, 6) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var caption = UiKit.Text(label, 14, FontWeights.Normal, Paint.Ink);
+        caption.VerticalAlignment = VerticalAlignment.Center;
+        var picks = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        foreach (var (text, size) in options)
+        {
+            var chosen = size;
+            var button = Small(text, () =>
+            {
+                selected = chosen;
+                MarkChosen();
+                pick(chosen);
+            }, true);
+            button.Margin = new Thickness(0, 0, text == "大" ? 0 : 8, 0);
+            buttons[chosen] = button;
+            picks.Children.Add(button);
+        }
+        MarkChosen();
+        Grid.SetColumn(picks, 1);
+        grid.Children.Add(caption);
+        grid.Children.Add(picks);
+        return grid;
+    }
+
     static UIElement Section(string title)
     {
         var text = UiKit.Text(title, 16, FontWeights.SemiBold, Paint.Ink);
@@ -657,7 +891,7 @@ public partial class ManagerWindow
         var dialog = new SaveFileDialog
         {
             Filter = "布局文件|*.json",
-            FileName = "桌面容器-布局.json"
+            FileName = Brand.Name + "-布局.json"
         };
         if (dialog.ShowDialog(this) != true) return;
         try

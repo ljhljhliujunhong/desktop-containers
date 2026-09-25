@@ -7,12 +7,14 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <RootNamespace>DesktopContainers</RootNamespace>
     <AssemblyName>DesktopContainers</AssemblyName>
     <Version>1.0.0</Version>
-    <Product>桌面容器</Product>
-    <Company>DesktopContainers</Company>
-    <Description>Windows 桌面应用分组容器</Description>
+    <Product>澄格</Product>
+    <AssemblyTitle>澄格</AssemblyTitle>
+    <Company>澄格</Company>
+    <Description>把桌面图标收进始终展开的容器</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>

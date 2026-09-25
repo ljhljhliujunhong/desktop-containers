@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 
@@ -18,7 +19,7 @@ public sealed class NewContainerWindow : Window
         _onboarding = onboarding;
         _themeId = AppHost.State.Settings.DefaultThemeId;
         Title = onboarding ? "第一个容器" : "新建容器";
-        Width = 460;
+        Width = 520;
         SizeToContent = SizeToContent.Height;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
@@ -59,17 +60,18 @@ public sealed class NewContainerWindow : Window
             if (e.Key == Key.Enter) Create();
         };
 
-        var themes = new WrapPanel { Margin = new Thickness(0, 14, 0, 0) };
+        var themes = new UniformGrid { Columns = 3, Margin = new Thickness(0, 14, 0, 0) };
         foreach (var theme in ThemeCatalog.All(AppHost.State.Document.CustomThemes))
         {
+            var look = AppHost.State.ThemeAppearance(theme.Id);
             var frame = new Border
             {
                 Padding = new Thickness(3),
-                Margin = new Thickness(0, 0, 8, 8),
+                Margin = new Thickness(4),
                 CornerRadius = new CornerRadius(16),
                 BorderThickness = new Thickness(2),
                 Cursor = Cursors.Hand,
-                Child = PreviewCard.Create(theme.Appearance, theme.Name, "", null, 92, 64)
+                Child = PreviewCard.Create(look, theme.Name, "", null, 128, 78)
             };
             var id = theme.Id;
             frame.MouseLeftButtonUp += (_, _) => Select(id);
@@ -106,15 +108,17 @@ public sealed class NewContainerWindow : Window
         var root = new Grid();
         root.Children.Add(new Border
         {
-            Margin = new Thickness(16, 20, 16, 12),
+            Margin = new Thickness(18, 22, 18, 14),
             CornerRadius = new CornerRadius(28),
-            Background = Paint.Brush(Color.FromArgb(0x18, 0, 0, 0)),
+            Background = Paint.Brush(Color.FromArgb(0x55, 0x5A, 0x30, 0x40)),
             IsHitTestVisible = false
         });
         root.Children.Add(new Border
         {
             Margin = new Thickness(16),
             Background = Brushes.White,
+            BorderBrush = Paint.Brush(Color.FromRgb(0xE8, 0x5A, 0x8C)),
+            BorderThickness = new Thickness(1.5),
             CornerRadius = new CornerRadius(24),
             Padding = new Thickness(22),
             Child = body

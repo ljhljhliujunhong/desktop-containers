@@ -69,6 +69,8 @@ public static class MiniDialog
         var card = new Border
         {
             Background = Brushes.White,
+            BorderBrush = Paint.Brush(Color.FromRgb(0xE8, 0x5A, 0x8C)),
+            BorderThickness = new Thickness(1.5),
             CornerRadius = new CornerRadius(22),
             Padding = new Thickness(22),
             Margin = new Thickness(14),
@@ -77,9 +79,9 @@ public static class MiniDialog
         var root = new Grid();
         root.Children.Add(new Border
         {
-            Background = Paint.Brush(Color.FromArgb(0x18, 0, 0, 0)),
+            Background = Paint.Brush(Color.FromArgb(0x55, 0x5A, 0x30, 0x40)),
             CornerRadius = new CornerRadius(26),
-            Margin = new Thickness(14, 18, 14, 10),
+            Margin = new Thickness(16, 20, 16, 12),
             IsHitTestVisible = false
         });
         root.Children.Add(card);
@@ -98,6 +100,7 @@ public static class MiniDialog
             };
         }
 
+        using var dim = ModalDim.Cover(owner);
         var accepted = window.ShowDialog() == true;
         text = input.Text;
         return accepted;

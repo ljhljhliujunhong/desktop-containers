@@ -22,6 +22,19 @@ public static class AppHost
 
     public static void Start(string[] args)
     {
+        var export = Array.IndexOf(args, "--export-icon");
+        if (export >= 0)
+        {
+            var path = export + 1 < args.Length
+                ? args[export + 1]
+                : Path.Combine(AppContext.BaseDirectory, "app.ico");
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            BrandIcon.SaveIco(path);
+            BrandIcon.SaveCanonical();
+            Application.Current.Shutdown(0);
+            return;
+        }
+
         IsSmoke = args.Contains("--smoke");
         DataRoot = ResolveDataRoot(args);
         Directory.CreateDirectory(DataRoot);

@@ -10,9 +10,7 @@ namespace DesktopContainers;
 public partial class ManagerWindow : Window
 {
     readonly Dictionary<string, Button> _nav = new();
-    readonly HashSet<string> _checked = new();
-    readonly List<CheckBox> _containerChecks = new();
-    bool _suppressCheckEvents;
+    readonly Dictionary<string, Border> _themeFrames = new();
     string _page = "home";
     string? _focusContainerId;
     string? _selectedThemeId;
@@ -33,13 +31,14 @@ public partial class ManagerWindow : Window
     Slider? _paddingSlider;
     Slider? _gapSlider;
     ToggleSwitch? _shadowSwitch;
+    Button? _updateThemeButton;
 
     public ManagerWindow()
     {
         var themes = AppHost.State.Document.CustomThemes;
         _selectedThemeId = AppHost.State.Settings.DefaultThemeId;
         _draft = ThemeCatalog.CreateAppearance(_selectedThemeId, themes);
-        Title = "桌面容器";
+        Title = Brand.Name;
         Width = 1080;
         Height = 720;
         MinWidth = 960;
@@ -54,7 +53,7 @@ public partial class ManagerWindow : Window
         Icon = BrandIcon.CreateBitmap(64);
         WindowChrome.SetWindowChrome(this, new WindowChrome
         {
-            CaptionHeight = 52,
+            CaptionHeight = 0,
             ResizeBorderThickness = new Thickness(6),
             GlassFrameThickness = new Thickness(0),
             UseAeroCaptionButtons = false,
@@ -67,6 +66,7 @@ public partial class ManagerWindow : Window
             var hwnd = new WindowInteropHelper(this).Handle;
             var preference = 2;
             _ = NativeMethods.DwmSetWindowAttribute(hwnd, 33, ref preference, 4);
+            HwndSource.FromHwnd(hwnd)?.AddHook(KeepCaptionLight);
         };
         Navigate("home");
     }
@@ -76,8 +76,6 @@ public partial class ManagerWindow : Window
         if (!string.IsNullOrWhiteSpace(containerId))
         {
             _focusContainerId = containerId;
-            _checked.Clear();
-            _checked.Add(containerId);
             var container = AppHost.State.Find(containerId);
             if (container != null && page == "themes")
             {
@@ -96,18 +94,19 @@ public partial class ManagerWindow : Window
 
     public void CreateContainer()
     {
-        var dialog = new NewContainerWindow(false, this);
-        if (dialog.ShowDialog() == true)
-            Navigate(_page);
+        using (ModalDim.Cover(this))
+        {
+            var dialog = new NewContainerWindow(false, this);
+            if (dialog.ShowDialog() == true)
+                Navigate(_page);
+        }
     }
 
     public void Navigate(string page)
     {
         _page = page;
         MarkNav();
-        _suppressCheckEvents = true;
         _content.Children.Clear();
-        _suppressCheckEvents = false;
         UIElement body = page switch
         {
             "containers" => BuildContainers(),
@@ -115,7 +114,7 @@ public partial class ManagerWindow : Window
             "settings" => BuildSettings(),
             _ => BuildHome()
         };
-        _content.Children.Add(page == "themes" ? body : UiKit.Scroll(body));
+        _content.Children.Add(page is "themes" or "containers" ? body : UiKit.Scroll(body));
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -149,7 +148,7 @@ public partial class ManagerWindow : Window
             Height = 28,
             Margin = new Thickness(0, 0, 10, 0)
         });
-        var brandText = UiKit.Text("桌面容器", 15, FontWeights.SemiBold, Paint.Ink);
+        var brandText = UiKit.Text(Brand.Name, 15, FontWeights.SemiBold, Paint.Ink);
         brandText.VerticalAlignment = VerticalAlignment.Center;
         brand.Children.Add(brandText);
         caption.Children.Add(brand);
@@ -163,6 +162,11 @@ public partial class ManagerWindow : Window
         windowButtons.Children.Add(CaptionButton("—", () => WindowState = WindowState.Minimized, false));
         windowButtons.Children.Add(CaptionButton("×", Close, true));
         caption.Children.Add(windowButtons);
+        caption.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.OriginalSource is DependencyObject source && FindsButton(source)) return;
+            try { DragMove(); } catch (InvalidOperationException) { /* 鼠标已经松开 */ }
+        };
 
         var body = new Grid();
         Grid.SetRow(body, 1);
@@ -235,6 +239,24 @@ public partial class ManagerWindow : Window
         button.Background = Paint.Brush(on ? Color.FromRgb(0xFF, 0xE4, 0xF1) : Colors.Transparent);
         button.Foreground = Paint.Brush(on ? Color.FromRgb(0xC7, 0x3B, 0x6F) : Paint.Ink);
         button.FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal;
+    }
+
+    static bool FindsButton(DependencyObject source)
+    {
+        while (source != null)
+        {
+            if (source is Button) return true;
+            source = VisualTreeHelper.GetParent(source) ?? LogicalTreeHelper.GetParent(source);
+        }
+        return false;
+    }
+
+    static IntPtr KeepCaptionLight(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_NCACTIVATE = 0x0086;
+        if (msg != WM_NCACTIVATE) return IntPtr.Zero;
+        handled = true;
+        return NativeMethods.DefWindowProc(hwnd, msg, new IntPtr(1), new IntPtr(-1));
     }
 
     static Button CaptionButton(string text, Action click, bool danger)

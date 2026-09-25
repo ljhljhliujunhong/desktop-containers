@@ -252,3 +252,42 @@ public sealed class ToggleSwitch : Border
         _knob.Margin = new Thickness(3);
     }
 }
+
+public static class ModalDim
+{
+    public static IDisposable Cover(Window? owner)
+    {
+        if (owner?.Content is not Panel panel) return Empty.Instance;
+        var shade = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0x8C, 0x14, 0x12, 0x16)),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        if (panel is Grid grid)
+        {
+            var rows = Math.Max(1, grid.RowDefinitions.Count);
+            var columns = Math.Max(1, grid.ColumnDefinitions.Count);
+            Grid.SetRowSpan(shade, rows);
+            Grid.SetColumnSpan(shade, columns);
+        }
+        Panel.SetZIndex(shade, 80);
+        panel.Children.Add(shade);
+        return new Covering(panel, shade);
+    }
+
+    sealed class Covering(Panel panel, UIElement shade) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (panel.Children.Contains(shade))
+                panel.Children.Remove(shade);
+        }
+    }
+
+    sealed class Empty : IDisposable
+    {
+        public static readonly Empty Instance = new();
+        public void Dispose() { }
+    }
+}

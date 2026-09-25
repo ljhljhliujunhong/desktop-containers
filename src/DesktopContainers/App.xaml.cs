@@ -29,7 +29,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             try { Log.Error("startup", ex); } catch { /* 日志还没准备好 */ }
-            MessageBox.Show(ex.Message, "桌面容器");
+            MessageBox.Show(ex.Message, Brand.Name);
             Shutdown(1);
         }
     }
@@ -44,6 +44,6 @@ public partial class App : Application
             Current.Shutdown(1);
             return;
         }
-        MessageBox.Show("出了点问题，布局已经尽量保存。", "桌面容器");
+        MessageBox.Show("出了点问题，布局已经尽量保存。", Brand.Name);
     }
 }

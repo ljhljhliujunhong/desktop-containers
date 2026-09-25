@@ -520,7 +520,7 @@ public sealed class ContainerWindow : Window
     {
         _menu.Items.Clear();
         _menu.Items.Add(Item("重命名", BeginRename));
-        _menu.Items.Add(Item("外观", () => AppHost.ShowManager("themes", Model.Id)));
+        _menu.Items.Add(Item("外观", () => AppHost.ShowManager("containers", Model.Id)));
         var sizes = new MenuItem { Header = "图标大小" };
         sizes.Items.Add(Item("小", () => Model.IconSize = 40));
         sizes.Items.Add(Item("中", () => Model.IconSize = 56));

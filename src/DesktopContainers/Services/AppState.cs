@@ -63,7 +63,7 @@ public sealed class AppState
             IconSize = Math.Clamp(Settings.DefaultIconSize, 32, 96),
             TitlePlacement = TitlePlacement.Top,
             ThemeId = theme.Id,
-            Appearance = appearance?.Clone() ?? theme.Appearance.Clone(),
+            Appearance = appearance?.Clone() ?? ThemeAppearance(theme.Id).Clone(),
             UpdatedUtc = DateTime.UtcNow
         };
         Document.Containers.Add(model);
@@ -179,6 +179,16 @@ public sealed class AppState
         return true;
     }
 
+    public bool ShiftApp(ContainerModel container, AppEntry app, int delta)
+    {
+        var index = container.Apps.IndexOf(app);
+        if (index < 0 || container.Locked) return false;
+        var target = index + delta;
+        if (target < 0 || target >= container.Apps.Count) return false;
+        var insert = delta > 0 ? target + 1 : target;
+        return MoveApp(container.Id, app.Id, container.Id, insert);
+    }
+
     public bool RestoreApp(ContainerModel container, AppEntry app)
     {
         if (container.Locked) return false;
@@ -274,6 +284,30 @@ public sealed class AppState
         if (Settings.DefaultThemeId == id)
             Settings.DefaultThemeId = ThemeCatalog.DefaultId;
         Flush();
+    }
+
+    public Appearance ThemeAppearance(string? id)
+    {
+        var theme = ThemeCatalog.Find(id, Document.CustomThemes)
+            ?? ThemeCatalog.Find(Settings.DefaultThemeId, Document.CustomThemes)
+            ?? ThemeCatalog.BuiltIns[0];
+        Settings.ThemeEdits ??= new List<ThemeEdit>();
+        var edit = Settings.ThemeEdits.FirstOrDefault(item => item.Id == theme.Id);
+        return edit?.Appearance ?? theme.Appearance;
+    }
+
+    public void SaveThemeEdit(string id, Appearance appearance)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return;
+        Settings.ThemeEdits ??= new List<ThemeEdit>();
+        var edit = Settings.ThemeEdits.FirstOrDefault(item => item.Id == id);
+        if (edit == null)
+        {
+            edit = new ThemeEdit { Id = id };
+            Settings.ThemeEdits.Add(edit);
+        }
+        edit.Appearance = appearance.Clone();
+        RequestSave();
     }
 
     public void SetDefaultTheme(string id)
@@ -372,6 +406,13 @@ public sealed class AppState
             document.Settings.DefaultIconSize = 56;
         if (string.IsNullOrWhiteSpace(document.Settings.DefaultThemeId))
             document.Settings.DefaultThemeId = ThemeCatalog.DefaultId;
+        document.Settings.ThemeEdits ??= new List<ThemeEdit>();
+        foreach (var edit in document.Settings.ThemeEdits)
+        {
+            if (string.IsNullOrWhiteSpace(edit.Id))
+                edit.Id = ThemeCatalog.DefaultId;
+            edit.Appearance ??= ThemeCatalog.CreateAppearance(edit.Id);
+        }
 
         foreach (var theme in document.CustomThemes)
         {

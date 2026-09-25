@@ -113,6 +113,9 @@ public static class NativeMethods
     [DllImport("dwmapi.dll")]
     public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+    [DllImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    public static extern IntPtr DefWindowProc(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
     public const uint SHGFI_ICON = 0x000000100;
     public const uint SHGFI_LARGEICON = 0x000000000;
 

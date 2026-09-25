@@ -84,6 +84,12 @@ public sealed class Appearance : ObservableObject
     }
 }
 
+public sealed class ThemeEdit
+{
+    public string Id { get; set; } = "";
+    public Appearance Appearance { get; set; } = new();
+}
+
 public sealed class ThemeDefinition
 {
     public string Id { get; set; } = "";
@@ -138,6 +144,7 @@ public sealed class AppSettings
     public bool ShowTitlesByDefault { get; set; } = true;
     public double DefaultIconSize { get; set; } = 56;
     public string DefaultThemeId { get; set; } = ThemeCatalog.DefaultId;
+    public List<ThemeEdit> ThemeEdits { get; set; } = new();
     public bool AnimationsEnabled { get; set; } = true;
     public bool EditMode { get; set; }
     public bool CompletedOnboarding { get; set; }
