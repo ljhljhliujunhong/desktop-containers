@@ -362,6 +362,7 @@ public sealed class ContainerWindow : Window
         _armDrag = false;
         if (!_dragging) return;
         _dragging = false;
+        AlignGuides.Hide();
         if (IsMouseCaptured) ReleaseMouseCapture();
         DesktopPlacement.Suspend = false;
         DesktopPlacement.PinAll();
@@ -372,9 +373,27 @@ public sealed class ContainerWindow : Window
     {
         base.OnMouseMove(e);
         if (!_dragging) return;
+        if (!IsMouseCaptured) CaptureMouse();
         NativeMethods.GetCursorPos(out var now);
-        Left = _armLeft + (now.X - _armPoint.X) * DipScaleX();
-        Top = _armTop + (now.Y - _armPoint.Y) * DipScaleY();
+        var rawLeft = _armLeft + (now.X - _armPoint.X) * DipScaleX();
+        var rawTop = _armTop + (now.Y - _armPoint.Y) * DipScaleY();
+        var width = ActualWidth > 1 ? ActualWidth : Width;
+        var height = ActualHeight > 1 ? ActualHeight : Height;
+        var raw = new AlignGuides.Box(
+            rawLeft + AlignGuides.Frame,
+            rawTop + AlignGuides.Frame,
+            rawLeft + width - AlignGuides.Frame,
+            rawTop + height - AlignGuides.Frame);
+        var others = new List<AlignGuides.Box>();
+        foreach (var window in AppHost.Windows)
+        {
+            if (ReferenceEquals(window, this) || !window.IsVisible) continue;
+            others.Add(AlignGuides.FromWindow(window));
+        }
+        var placed = AlignGuides.Place(raw, others);
+        Left = placed.Left;
+        Top = placed.Top;
+        AlignGuides.Show(placed.Lines);
     }
 
     void OnLoaded(object sender, RoutedEventArgs e)
