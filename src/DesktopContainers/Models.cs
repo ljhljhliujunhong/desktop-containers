@@ -148,6 +148,8 @@ public sealed class AppSettings
     public bool AnimationsEnabled { get; set; } = true;
     public bool EditMode { get; set; }
     public bool CompletedOnboarding { get; set; }
+    public bool UnifyOpacity { get; set; }
+    public double UnifiedOpacity { get; set; } = 0.94;
 }
 
 public sealed class LayoutDocument
@@ -242,9 +244,9 @@ public static class Paint
 
 public static class AppearancePainter
 {
-    public static LinearGradientBrush Background(Appearance appearance)
+    public static LinearGradientBrush Background(Appearance appearance, double? opacityOverride = null)
     {
-        var opacity = Math.Clamp(appearance.BackgroundOpacity, 0, 1);
+        var opacity = Math.Clamp(opacityOverride ?? appearance.BackgroundOpacity, 0, 1);
         var brush = new LinearGradientBrush
         {
             StartPoint = new System.Windows.Point(0, 0),

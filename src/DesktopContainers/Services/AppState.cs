@@ -404,6 +404,9 @@ public sealed class AppState
         if (document.Version <= 0) document.Version = 1;
         if (document.Settings.DefaultIconSize is < 32 or > 96)
             document.Settings.DefaultIconSize = 56;
+        if (!double.IsFinite(document.Settings.UnifiedOpacity))
+            document.Settings.UnifiedOpacity = 0.94;
+        document.Settings.UnifiedOpacity = Math.Clamp(document.Settings.UnifiedOpacity, 0, 1);
         if (string.IsNullOrWhiteSpace(document.Settings.DefaultThemeId))
             document.Settings.DefaultThemeId = ThemeCatalog.DefaultId;
         document.Settings.ThemeEdits ??= new List<ThemeEdit>();

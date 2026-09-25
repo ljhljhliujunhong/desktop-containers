@@ -20,6 +20,12 @@ public static class AppHost
     public static bool SuppressPersist { get; set; }
     public static IReadOnlyList<ContainerWindow> Windows => _windows;
 
+    public static void RepaintContainers()
+    {
+        foreach (var window in _windows.ToArray())
+            window.Repaint();
+    }
+
     public static void Start(string[] args)
     {
         var export = Array.IndexOf(args, "--export-icon");

@@ -107,8 +107,9 @@ public static class UiKit
 
     public static (Grid row, Slider slider) SliderRow(string label, double min, double max, double value, bool fine = false)
     {
+        var labeled = !string.IsNullOrEmpty(label);
         var grid = new Grid { Margin = new Thickness(0, 6, 0, 6) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(labeled ? 88 : 0) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(fine ? 58 : 48) });
         var caption = Text(label, 13, FontWeights.Normal, Paint.Ink);
@@ -119,7 +120,7 @@ public static class UiKit
             Maximum = max,
             Value = value,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 8, 0),
+            Margin = new Thickness(labeled ? 8 : 0, 0, 8, 0),
             Foreground = Paint.Brush(Paint.Accent),
             IsSnapToTickEnabled = false,
             IsMoveToPointEnabled = true,

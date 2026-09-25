@@ -20,6 +20,23 @@ public partial class ManagerWindow
         stats.Children.Add(Stat(containers.Sum(item => item.Apps.Count).ToString(), "应用"));
         page.Children.Add(stats);
 
+        var previewHosts = new List<(ContainerModel Model, Border Host)>();
+        void RefreshHomePreviews()
+        {
+            foreach (var (model, host) in previewHosts)
+            {
+                host.Child = PreviewCard.Create(
+                    DesktopLook(model),
+                    model.Name,
+                    model.Apps.Count + " 个",
+                    model.Apps,
+                    220,
+                    148);
+            }
+        }
+
+        page.Children.Add(UnifiedOpacityCard(RefreshHomePreviews));
+
         if (containers.Count == 0)
         {
             var empty = new StackPanel();
@@ -36,14 +53,14 @@ public partial class ManagerWindow
             var wrap = new WrapPanel();
             foreach (var container in containers.OrderByDescending(item => item.UpdatedUtc).Take(4))
             {
-                var card = PreviewCard.Create(container.Appearance, container.Name, container.Apps.Count + " 个", container.Apps, 220, 148);
                 var host = new Border
                 {
-                    Child = card,
+                    Child = PreviewCard.Create(DesktopLook(container), container.Name, container.Apps.Count + " 个", container.Apps, 220, 148),
                     Margin = new Thickness(0, 0, 14, 14),
                     Cursor = Cursors.Hand,
                     CornerRadius = new CornerRadius(22)
                 };
+                previewHosts.Add((container, host));
                 var id = container.Id;
                 host.MouseLeftButtonUp += (_, _) =>
                 {
@@ -77,6 +94,89 @@ public partial class ManagerWindow
         all.HorizontalAlignment = HorizontalAlignment.Left;
         page.Children.Add(all);
         return page;
+    }
+
+    static Appearance DesktopLook(ContainerModel container)
+    {
+        if (!AppHost.State.Settings.UnifyOpacity) return container.Appearance;
+        var look = container.Appearance.Clone();
+        look.BackgroundOpacity = AppHost.State.Settings.UnifiedOpacity;
+        return look;
+    }
+
+    UIElement UnifiedOpacityCard(Action refreshHome)
+    {
+        var settings = AppHost.State.Settings;
+        var body = new StackPanel();
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var title = UiKit.Text("统一透明度", 16, FontWeights.SemiBold, Paint.Ink);
+        title.VerticalAlignment = VerticalAlignment.Center;
+        var mark = new TextBlock
+        {
+            Text = "✓",
+            FontFamily = UiKit.Font,
+            FontSize = 14,
+            FontWeight = FontWeights.Bold,
+            Foreground = Brushes.White,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, -1, 0, 0),
+            IsHitTestVisible = false
+        };
+        var box = new Border
+        {
+            Width = 22,
+            Height = 22,
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1.5),
+            Cursor = Cursors.Hand,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = mark
+        };
+        var (row, slider) = UiKit.SliderRow("", 0, 1, settings.UnifiedOpacity, true);
+        row.Margin = new Thickness(0, 12, 0, 0);
+        var applying = false;
+
+        void PaintBox()
+        {
+            var on = settings.UnifyOpacity;
+            box.Background = Paint.Brush(on ? Paint.Accent : Colors.White);
+            box.BorderBrush = Paint.Brush(on ? Paint.Accent : Color.FromRgb(0xE0, 0xD0, 0xD8));
+            mark.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            slider.IsEnabled = on;
+            row.Opacity = on ? 1 : 0.45;
+        }
+
+        void Apply(bool enabled)
+        {
+            if (applying) return;
+            applying = true;
+            settings.UnifyOpacity = enabled;
+            settings.UnifiedOpacity = slider.Value;
+            PaintBox();
+            applying = false;
+            AppHost.State.RequestSave();
+            AppHost.RepaintContainers();
+            refreshHome();
+        }
+
+        box.MouseLeftButtonUp += (_, _) => Apply(!settings.UnifyOpacity);
+        slider.ValueChanged += (_, _) =>
+        {
+            if (applying || !settings.UnifyOpacity) return;
+            Apply(true);
+        };
+        PaintBox();
+        Grid.SetColumn(box, 1);
+        head.Children.Add(title);
+        head.Children.Add(box);
+        body.Children.Add(head);
+        body.Children.Add(row);
+        var card = UiKit.Card(body, new Thickness(18, 16, 18, 16));
+        card.Margin = new Thickness(0, 0, 0, 22);
+        return card;
     }
 
     UIElement BuildContainers()

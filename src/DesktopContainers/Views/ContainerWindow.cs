@@ -213,6 +213,8 @@ public sealed class ContainerWindow : Window
         Loaded += OnLoaded;
     }
 
+    public void Repaint() => PaintCard();
+
     public void ApplyChrome()
     {
         var edit = AppHost.State.Settings.EditMode && !Model.Locked;
@@ -384,7 +386,8 @@ public sealed class ContainerWindow : Window
     void PaintCard()
     {
         var appearance = Model.Appearance;
-        _card.Background = AppearancePainter.Background(appearance);
+        var unified = AppHost.State.Settings.UnifyOpacity ? AppHost.State.Settings.UnifiedOpacity : (double?)null;
+        _card.Background = AppearancePainter.Background(appearance, unified);
         _card.BorderBrush = _glass.Rim;
         _card.CornerRadius = new CornerRadius(appearance.CornerRadius);
         _card.Padding = new Thickness(0);
