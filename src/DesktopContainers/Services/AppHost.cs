@@ -26,6 +26,31 @@ public static class AppHost
             window.Repaint();
     }
 
+    public static void RefreshContainerLayout()
+    {
+        foreach (var window in _windows.ToArray())
+            window.RefreshLayout();
+    }
+
+    public static bool ShowsTitle(ContainerModel model)
+    {
+        if (State.Settings.UnifyTitles) return State.Settings.UnifiedShowTitles;
+        return model.ShowTitle && model.TitlePlacement != TitlePlacement.Hidden;
+    }
+
+    public static bool ShowsNames(ContainerModel model)
+    {
+        if (State.Settings.UnifyNames) return State.Settings.UnifiedShowNames;
+        return model.ShowNames;
+    }
+
+    public static double IconSize(ContainerModel model)
+    {
+        if (State.Settings.UnifyIconSize)
+            return State.Settings.UnifiedIconSize;
+        return model.IconSize;
+    }
+
     public static void Start(string[] args)
     {
         var export = Array.IndexOf(args, "--export-icon");

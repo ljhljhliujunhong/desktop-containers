@@ -35,7 +35,8 @@ public partial class ManagerWindow
             }
         }
 
-        page.Children.Add(UnifiedOpacityCard(RefreshHomePreviews));
+        page.Children.Add(Section("全部容器"));
+        page.Children.Add(DesktopUniformCard(RefreshHomePreviews));
 
         if (containers.Count == 0)
         {
@@ -104,78 +105,217 @@ public partial class ManagerWindow
         return look;
     }
 
-    UIElement UnifiedOpacityCard(Action refreshHome)
+    UIElement DesktopUniformCard(Action refreshHome)
     {
         var settings = AppHost.State.Settings;
-        var body = new StackPanel();
-        var head = new Grid();
-        head.ColumnDefinitions.Add(new ColumnDefinition());
-        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var title = UiKit.Text("统一透明度", 16, FontWeights.SemiBold, Paint.Ink);
-        title.VerticalAlignment = VerticalAlignment.Center;
-        var mark = new TextBlock
-        {
-            Text = "✓",
-            FontFamily = UiKit.Font,
-            FontSize = 14,
-            FontWeight = FontWeights.Bold,
-            Foreground = Brushes.White,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, -1, 0, 0),
-            IsHitTestVisible = false
-        };
-        var box = new Border
-        {
-            Width = 22,
-            Height = 22,
-            CornerRadius = new CornerRadius(6),
-            BorderThickness = new Thickness(1.5),
-            Cursor = Cursors.Hand,
-            VerticalAlignment = VerticalAlignment.Center,
-            Child = mark
-        };
-        var (row, slider) = UiKit.SliderRow("", 0, 1, settings.UnifiedOpacity, true);
-        row.Margin = new Thickness(0, 12, 0, 0);
-        var applying = false;
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
 
-        void PaintBox()
+        var opacityOn = false;
+        var applyingOpacity = false;
+        var (sliderRow, slider) = UiKit.SliderRow("", 0, 1, settings.UnifiedOpacity, true);
+        sliderRow.Margin = new Thickness(8, 0, 0, 0);
+
+        var sizeHost = new StackPanel
         {
-            var on = settings.UnifyOpacity;
-            box.Background = Paint.Brush(on ? Paint.Accent : Colors.White);
-            box.BorderBrush = Paint.Brush(on ? Paint.Accent : Color.FromRgb(0xE0, 0xD0, 0xD8));
-            mark.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-            slider.IsEnabled = on;
-            row.Opacity = on ? 1 : 0.45;
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0)
+        };
+        var sizeButtons = new Dictionary<double, Button>();
+        void PaintSizes()
+        {
+            foreach (var (size, button) in sizeButtons)
+            {
+                var chosen = Math.Abs(size - settings.UnifiedIconSize) < 0.5;
+                button.BorderBrush = Paint.Brush(chosen ? Paint.Accent : Paint.Line);
+            }
+            sizeHost.Opacity = settings.UnifyIconSize ? 1 : 0.4;
+            sizeHost.IsHitTestVisible = settings.UnifyIconSize;
+        }
+        foreach (var (text, size) in new (string Text, double Size)[] { ("小", 40), ("中", 56), ("大", 80) })
+        {
+            var chosen = size;
+            var button = Small(text, () =>
+            {
+                if (!settings.UnifyIconSize) return;
+                settings.UnifiedIconSize = chosen;
+                PaintSizes();
+                AppHost.State.RequestSave();
+                AppHost.RefreshContainerLayout();
+            }, true);
+            button.Margin = new Thickness(0, 0, text == "大" ? 0 : 8, 0);
+            sizeButtons[chosen] = button;
+            sizeHost.Children.Add(button);
         }
 
-        void Apply(bool enabled)
+        (StackPanel Host, Action Refresh) ShowHide(Func<bool> showing, Action<bool> set, Func<bool> enabled)
         {
-            if (applying) return;
-            applying = true;
-            settings.UnifyOpacity = enabled;
+            var host = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0)
+            };
+            Button show = null!;
+            Button hide = null!;
+            void PaintChoice()
+            {
+                var on = showing();
+                show.BorderBrush = Paint.Brush(on ? Paint.Accent : Paint.Line);
+                hide.BorderBrush = Paint.Brush(on ? Paint.Line : Paint.Accent);
+                host.Opacity = enabled() ? 1 : 0.4;
+                host.IsHitTestVisible = enabled();
+            }
+            void Pick(bool value)
+            {
+                if (!enabled()) return;
+                set(value);
+                PaintChoice();
+                AppHost.State.RequestSave();
+                AppHost.RefreshContainerLayout();
+            }
+            show = Small("显示", () => Pick(true), true);
+            hide = Small("隐藏", () => Pick(false), true);
+            show.Margin = new Thickness(0, 0, 8, 0);
+            hide.Margin = new Thickness(0);
+            host.Children.Add(show);
+            host.Children.Add(hide);
+            PaintChoice();
+            return (host, PaintChoice);
+        }
+
+        var titleChoices = ShowHide(
+            () => settings.UnifiedShowTitles,
+            value => settings.UnifiedShowTitles = value,
+            () => settings.UnifyTitles);
+        var nameChoices = ShowHide(
+            () => settings.UnifiedShowNames,
+            value => settings.UnifiedShowNames = value,
+            () => settings.UnifyNames);
+
+        Border Check(int row, string label, Func<bool> read, Action toggle, UIElement? extra)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var caption = UiKit.Text(label, 14, FontWeights.Normal, Paint.Ink);
+            caption.VerticalAlignment = VerticalAlignment.Center;
+            caption.Margin = new Thickness(0, 11, 0, 11);
+            var mark = new TextBlock
+            {
+                Text = "✓",
+                FontFamily = UiKit.Font,
+                FontSize = 14,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, -1, 0, 0),
+                IsHitTestVisible = false
+            };
+            var box = new Border
+            {
+                Width = 22,
+                Height = 22,
+                CornerRadius = new CornerRadius(6),
+                BorderThickness = new Thickness(1.5),
+                Cursor = Cursors.Hand,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Child = mark
+            };
+            void PaintMark()
+            {
+                var on = read();
+                box.Background = Paint.Brush(on ? Paint.Accent : Colors.White);
+                box.BorderBrush = Paint.Brush(on ? Paint.Accent : Color.FromRgb(0xE0, 0xD0, 0xD8));
+                mark.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            }
+            box.MouseLeftButtonUp += (_, _) => toggle();
+            Grid.SetRow(caption, row);
+            Grid.SetRow(box, row);
+            Grid.SetColumn(box, 1);
+            grid.Children.Add(caption);
+            grid.Children.Add(box);
+            if (extra != null)
+            {
+                extra.SetValue(Grid.RowProperty, row);
+                extra.SetValue(Grid.ColumnProperty, 2);
+                if (extra is FrameworkElement element)
+                    element.VerticalAlignment = VerticalAlignment.Center;
+                grid.Children.Add(extra);
+            }
+            PaintMark();
+            box.Tag = (Action)PaintMark;
+            return box;
+        }
+
+        void RepaintCheck(Border box) => ((Action)box.Tag)();
+
+        Border opacityBox = null!;
+        opacityBox = Check(0, "透明度", () => settings.UnifyOpacity, () =>
+        {
+            if (applyingOpacity) return;
+            applyingOpacity = true;
+            settings.UnifyOpacity = !settings.UnifyOpacity;
             settings.UnifiedOpacity = slider.Value;
-            PaintBox();
-            applying = false;
+            opacityOn = settings.UnifyOpacity;
+            slider.IsEnabled = opacityOn;
+            sliderRow.Opacity = opacityOn ? 1 : 0.4;
+            sliderRow.IsHitTestVisible = opacityOn;
+            RepaintCheck(opacityBox);
+            applyingOpacity = false;
             AppHost.State.RequestSave();
             AppHost.RepaintContainers();
             refreshHome();
-        }
+        }, sliderRow);
+        Border titleBox = null!;
+        titleBox = Check(1, "标题", () => settings.UnifyTitles, () =>
+        {
+            settings.UnifyTitles = !settings.UnifyTitles;
+            titleChoices.Refresh();
+            RepaintCheck(titleBox);
+            AppHost.State.RequestSave();
+            AppHost.RefreshContainerLayout();
+        }, titleChoices.Host);
+        Border nameBox = null!;
+        nameBox = Check(2, "图标名称", () => settings.UnifyNames, () =>
+        {
+            settings.UnifyNames = !settings.UnifyNames;
+            nameChoices.Refresh();
+            RepaintCheck(nameBox);
+            AppHost.State.RequestSave();
+            AppHost.RefreshContainerLayout();
+        }, nameChoices.Host);
+        Border sizeBox = null!;
+        sizeBox = Check(3, "图标大小", () => settings.UnifyIconSize, () =>
+        {
+            settings.UnifyIconSize = !settings.UnifyIconSize;
+            PaintSizes();
+            RepaintCheck(sizeBox);
+            AppHost.State.RequestSave();
+            AppHost.RefreshContainerLayout();
+        }, sizeHost);
 
-        box.MouseLeftButtonUp += (_, _) => Apply(!settings.UnifyOpacity);
         slider.ValueChanged += (_, _) =>
         {
-            if (applying || !settings.UnifyOpacity) return;
-            Apply(true);
+            if (applyingOpacity || !settings.UnifyOpacity) return;
+            applyingOpacity = true;
+            settings.UnifiedOpacity = slider.Value;
+            applyingOpacity = false;
+            AppHost.State.RequestSave();
+            AppHost.RepaintContainers();
+            refreshHome();
         };
-        PaintBox();
-        Grid.SetColumn(box, 1);
-        head.Children.Add(title);
-        head.Children.Add(box);
-        body.Children.Add(head);
-        body.Children.Add(row);
-        var card = UiKit.Card(body, new Thickness(18, 16, 18, 16));
-        card.Margin = new Thickness(0, 0, 0, 22);
+        opacityOn = settings.UnifyOpacity;
+        slider.IsEnabled = opacityOn;
+        sliderRow.Opacity = opacityOn ? 1 : 0.4;
+        sliderRow.IsHitTestVisible = opacityOn;
+        PaintSizes();
+
+        var card = UiKit.Card(grid, new Thickness(18, 8, 18, 8));
+        card.Margin = new Thickness(0, 0, 0, 14);
         return card;
     }
 

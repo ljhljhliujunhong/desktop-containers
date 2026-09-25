@@ -18,16 +18,17 @@ public sealed class AppIconView : StackPanel
     {
         _model = model;
         _entry = entry;
+        var size = AppHost.IconSize(model);
         Orientation = Orientation.Vertical;
         Cursor = Cursors.Hand;
         ToolTip = entry.DisplayName;
-        Width = model.IconSize + 28;
+        Width = size + 28;
         Margin = new Thickness(model.Appearance.IconGap / 2);
 
         var host = new Grid
         {
-            Width = model.IconSize,
-            Height = model.IconSize,
+            Width = size,
+            Height = size,
             HorizontalAlignment = HorizontalAlignment.Center,
             RenderTransformOrigin = new Point(0.5, 0.5),
             RenderTransform = new ScaleTransform(1, 1)
@@ -40,7 +41,7 @@ public sealed class AppIconView : StackPanel
             {
                 Text = string.IsNullOrWhiteSpace(entry.DisplayName) ? "?" : entry.DisplayName.Trim()[..1],
                 FontFamily = UiKit.Font,
-                FontSize = Math.Max(12, model.IconSize * 0.28),
+                FontSize = Math.Max(12, size * 0.28),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Foreground = Paint.Brush(Paint.Hex(model.Appearance.TitleColor))
@@ -54,7 +55,7 @@ public sealed class AppIconView : StackPanel
         if (entry.Missing)
             _image.Opacity = 0.35;
 
-        if (model.ShowNames)
+        if (AppHost.ShowsNames(model))
         {
             Children.Add(new TextBlock
             {

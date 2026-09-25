@@ -407,6 +407,9 @@ public sealed class AppState
         if (!double.IsFinite(document.Settings.UnifiedOpacity))
             document.Settings.UnifiedOpacity = 0.94;
         document.Settings.UnifiedOpacity = Math.Clamp(document.Settings.UnifiedOpacity, 0, 1);
+        if (!double.IsFinite(document.Settings.UnifiedIconSize))
+            document.Settings.UnifiedIconSize = 56;
+        document.Settings.UnifiedIconSize = NearestIconSize(document.Settings.UnifiedIconSize);
         if (string.IsNullOrWhiteSpace(document.Settings.DefaultThemeId))
             document.Settings.DefaultThemeId = ThemeCatalog.DefaultId;
         document.Settings.ThemeEdits ??= new List<ThemeEdit>();
@@ -448,5 +451,21 @@ public sealed class AppState
                     app.FileName = app.Id + ".lnk";
             }
         }
+    }
+
+    static double NearestIconSize(double value)
+    {
+        double best = 56;
+        var bestDist = double.MaxValue;
+        foreach (var size in new[] { 40d, 56d, 80d })
+        {
+            var dist = Math.Abs(value - size);
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = size;
+            }
+        }
+        return best;
     }
 }

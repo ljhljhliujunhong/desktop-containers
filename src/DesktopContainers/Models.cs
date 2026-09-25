@@ -150,6 +150,12 @@ public sealed class AppSettings
     public bool CompletedOnboarding { get; set; }
     public bool UnifyOpacity { get; set; }
     public double UnifiedOpacity { get; set; } = 0.94;
+    public bool UnifyTitles { get; set; }
+    public bool UnifiedShowTitles { get; set; }
+    public bool UnifyNames { get; set; }
+    public bool UnifiedShowNames { get; set; }
+    public bool UnifyIconSize { get; set; }
+    public double UnifiedIconSize { get; set; } = 56;
 }
 
 public sealed class LayoutDocument

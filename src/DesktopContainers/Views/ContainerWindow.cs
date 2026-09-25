@@ -215,6 +215,12 @@ public sealed class ContainerWindow : Window
 
     public void Repaint() => PaintCard();
 
+    public void RefreshLayout()
+    {
+        ApplyTitle();
+        ScheduleRebuild();
+    }
+
     public void ApplyChrome()
     {
         var edit = AppHost.State.Settings.EditMode && !Model.Locked;
@@ -411,7 +417,10 @@ public sealed class ContainerWindow : Window
         _title.Foreground = Paint.Brush(ink);
         Paint.ApplyTitlePlate(_titleChip, ink);
         _editor.Foreground = _title.Foreground;
-        var show = Model.ShowTitle && Model.TitlePlacement != TitlePlacement.Hidden;
+        var show = AppHost.ShowsTitle(Model);
+        var place = Model.TitlePlacement == TitlePlacement.Hidden && AppHost.ShowsTitle(Model)
+            ? TitlePlacement.Top
+            : Model.TitlePlacement;
         var titleVisible = show && !_renaming ? Visibility.Visible : Visibility.Collapsed;
         _title.Visibility = titleVisible;
         _titleChip.Visibility = titleVisible;
@@ -426,7 +435,7 @@ public sealed class ContainerWindow : Window
             return;
         }
 
-        switch (Model.TitlePlacement)
+        switch (place)
         {
             case TitlePlacement.Bottom:
                 PlaceTitle(HorizontalAlignment.Center, new Thickness(4, 10, 4, 0), bottom: true);
@@ -696,9 +705,10 @@ public sealed class ContainerWindow : Window
     void MeasureCells()
     {
         var gap = Model.Appearance.IconGap;
-        _cellW = Model.IconSize + 28 + gap;
-        _cellH = Model.IconSize + gap;
-        if (Model.ShowNames) _cellH += 22;
+        var iconSize = AppHost.IconSize(Model);
+        _cellW = iconSize + 28 + gap;
+        _cellH = iconSize + gap;
+        if (AppHost.ShowsNames(Model)) _cellH += 22;
         if (Model.Apps.Any(app => app.Missing)) _cellH += 17;
         if (_icons.Count == 0) return;
         var width = 0d;
@@ -757,7 +767,7 @@ public sealed class ContainerWindow : Window
 
     double NaturalTitleWidth()
     {
-        if (!Model.ShowTitle || Model.TitlePlacement == TitlePlacement.Hidden) return 0;
+        if (!AppHost.ShowsTitle(Model)) return 0;
         var cap = _title.MaxWidth;
         _title.MaxWidth = 240;
         _titleChip.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -788,7 +798,7 @@ public sealed class ContainerWindow : Window
         var frame = _card.Margin.Top + _card.Margin.Bottom
             + _card.BorderThickness.Top + _card.BorderThickness.Bottom
             + Model.Appearance.Padding * 2;
-        if (Model.ShowTitle && Model.TitlePlacement != TitlePlacement.Hidden)
+        if (AppHost.ShowsTitle(Model))
         {
             var textWidth = Math.Max(40, contentWidth - _titleChip.Margin.Left - _titleChip.Margin.Right);
             _titleChip.Measure(new Size(textWidth, double.PositiveInfinity));
