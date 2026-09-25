@@ -141,13 +141,6 @@ public partial class ManagerWindow : Window
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(18, 0, 0, 0)
         };
-        brand.Children.Add(new Image
-        {
-            Source = BrandIcon.CreateBitmap(128),
-            Width = 28,
-            Height = 28,
-            Margin = new Thickness(0, 0, 10, 0)
-        });
         var brandText = UiKit.Text(Brand.Name, 15, FontWeights.SemiBold, Paint.Ink);
         brandText.VerticalAlignment = VerticalAlignment.Center;
         brand.Children.Add(brandText);

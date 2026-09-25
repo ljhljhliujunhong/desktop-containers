@@ -1,4 +1,4 @@
-# 澄格 — AI 接手说明
+# 莓格 — AI 接手说明
 
 这份文档给下一个接手本仓库的 AI。产品需求在同目录的 `需求文档.md`。这里只写已经落地的实现、约束和改哪里。
 
@@ -10,7 +10,7 @@ Windows 桌面上始终展开的应用分组。用户建一个有名字的容器
 
 另有一个管理窗口：首页、容器、主题、设置。第一次打开会先问容器名字和主题。托盘可以打开管理窗口、开关编辑模式、新建容器、退出。关掉管理窗口只是隐藏，托盘里的「退出」才结束进程。
 
-界面对用户显示的产品名是「澄格」（代码里的 `Brand.Name`）。标志由 `Views\BrandIcon.cs` 画出来：粉紫圆角底、白卡片、一条粉标题和三个色点。窗口图标、托盘图标和 exe 图标都用它。exe 图标文件是 `src\DesktopContainers\Assets\app.ico`，由 `dotnet run -- --export-icon <路径>` 生成后再编译进去。
+界面对用户显示的产品名是「莓格」，英文名是 BerryGrid（`Brand.Name` / `Brand.EnglishName`）。管理窗口顶栏只写这个名字，不放标志图。标志原图是仓库根目录的 `EXELogo.png`，编译时嵌在 `Assets\logo.png`。任务栏图标、托盘图标和 exe 图标都用它。exe 图标文件是 `src\DesktopContainers\Assets\app.ico`，由 `dotnet run -- --export-icon <路径>` 从这张图生成后再编译进去。换图时先覆盖 `EXELogo.png`，再复制到 `Assets\logo.png`，导出 ico，然后重新发布。
 
 界面文案是中文。视觉是浅纸色 `#FFF7F4`、强调色 `#E85A8C`、大圆角。滚动条是 `App.xaml` 里的细圆角样式，没有箭头按钮。不要把需求文档、设计原则或操作教程写到界面上。删除确认可以在当下说明后果，现有文案是「能用的快捷方式会回到桌面，程序不会被卸掉。」空容器只在没有任何应用时显示「拖到这里」。找不到目标时显示「找不到」。
 
@@ -33,13 +33,15 @@ Windows 桌面上始终展开的应用分组。用户建一个有名字的容器
 
 ```
 桌面容器\
-  澄格.exe                  用户双击这个文件启动。单文件自包含发布，已 gitignore
-  启动桌面容器.cmd          转去启动根目录的 澄格.exe
+  莓格.exe                  用户双击这个文件启动。单文件自包含发布，已 gitignore
+  EXELogo.png               标志原图。换图后复制到 Assets\logo.png，再导出 ico
+  启动桌面容器.cmd          转去启动根目录的 莓格.exe
   app\                      同一份 exe 的副本，文件名仍是 DesktopContainers.exe，gitignore
   docs\需求文档.md
   docs\AI接手说明.md
   src\DesktopContainers\
     DesktopContainers.csproj
+    Assets\logo.png         嵌进程序的标志，从仓库根目录的 EXELogo.png 复制
     Assets\app.ico          exe 图标，改标志后要重新导出再编译
     app.manifest            长路径；DPI 由项目属性 ApplicationHighDpiMode=PerMonitorV2 负责
     App.xaml / App.xaml.cs  无 StartupUri；滚动条样式在 App.xaml；异常时先 Flush 布局
@@ -85,17 +87,17 @@ $env:TMP = $env:TEMP
 & "$env:DOTNET_ROOT\dotnet.exe" run --project 'E:\VsCodeProject\桌面容器\src\DesktopContainers\DesktopContainers.csproj' -c Release -- --export-icon 'E:\VsCodeProject\桌面容器\src\DesktopContainers\Assets\app.ico'
 ```
 
-发布单文件 exe。用户双击的是项目根目录的 `澄格.exe`，所以每次改完代码都要重新发布并覆盖它，同时覆盖 `app\DesktopContainers.exe`，避免开机启动还指着旧文件。发布前先关掉正在运行的澄格，否则文件会被锁住。
+发布单文件 exe。用户双击的是项目根目录的 `莓格.exe`，所以每次改完代码都要重新发布并覆盖它，同时覆盖 `app\DesktopContainers.exe`，避免开机启动还指着旧文件。发布前先关掉正在运行的莓格，否则文件会被锁住。
 
 ```powershell
 $stage = 'E:\VsCodeProject\AgentCache\temp\desktop-containers\publish-single'
 & "$env:DOTNET_ROOT\dotnet.exe" publish 'E:\VsCodeProject\桌面容器\src\DesktopContainers\DesktopContainers.csproj' -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o $stage
-Copy-Item "$stage\DesktopContainers.exe" 'E:\VsCodeProject\桌面容器\澄格.exe' -Force
+Copy-Item "$stage\DesktopContainers.exe" 'E:\VsCodeProject\桌面容器\莓格.exe' -Force
 New-Item -ItemType Directory -Force -Path 'E:\VsCodeProject\桌面容器\app' | Out-Null
 Copy-Item "$stage\DesktopContainers.exe" 'E:\VsCodeProject\桌面容器\app\DesktopContainers.exe' -Force
 ```
 
-然后双击仓库根目录的 `澄格.exe`。
+然后双击仓库根目录的 `莓格.exe`。
 
 命令行：
 
@@ -173,7 +175,7 @@ logs\app.log
 ## 单实例、开机启动、DPI
 
 - 互斥量：`Local\DesktopContainers_` + 数据目录哈希 + `_m`。事件是同一个前缀 + `_e`。上次崩溃留下的 abandoned mutex 直接接手。第二个实例发信号，第一个把管理窗口显示出来。
-- 开机启动：`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名 `DesktopContainers`，内容是 `"exe" --startup`。设置项是准的；启动时按设置写回注册表。
+- 开机启动：`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名 `BerryGrid`，内容是 `"exe" --startup`。启动时如果设置开着，会写回当前 exe 的路径，并删掉旧值名 `DesktopContainers`。设置项是准的。
 - DPI：`ApplicationHighDpiMode` 为 `PerMonitorV2`。不要在 `app.manifest` 里再写 `dpiAware` / `dpiAwareness`，SDK 会警告并剥掉。鼠标拖动的像素差用 `TransformFromDevice` 的 M11/M22 换回 DIP。
 
 ## 改功能时先看哪里
@@ -207,7 +209,7 @@ logs\app.log
 - 不要给透明窗口加 `DropShadowEffect` 或 `WS_EX_NOACTIVATE`。
 - 不要在冒烟或测试里删除用户桌面上的快捷方式，也不要模拟 Win+D。
 - 不要卸载或删除用户的 exe。删除容器只移动本程序拥有的快捷方式。
-- 用户没明确要求时不要提交 git。`澄格.exe`、`app\`、`bin\`、`obj\` 不要提交。
+- 用户没明确要求时不要提交 git。`莓格.exe`、`app\`、`bin\`、`obj\` 不要提交。
 
 ## 已知限制
 

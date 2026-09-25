@@ -11,15 +11,18 @@
     <RootNamespace>DesktopContainers</RootNamespace>
     <AssemblyName>DesktopContainers</AssemblyName>
     <Version>1.0.0</Version>
-    <Product>澄格</Product>
-    <AssemblyTitle>澄格</AssemblyTitle>
-    <Company>澄格</Company>
-    <Description>把桌面图标收进始终展开的容器</Description>
+    <Product>BerryGrid</Product>
+    <AssemblyTitle>莓格</AssemblyTitle>
+    <Company>BerryGrid</Company>
+    <Description>莓格</Description>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\logo.png" />
+  </ItemGroup>
   <ItemGroup>
     <Using Remove="System.Drawing" />
     <Using Remove="System.Windows.Forms" />
