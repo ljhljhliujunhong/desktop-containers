@@ -8,7 +8,9 @@ namespace DesktopContainers;
 
 public sealed class IconService
 {
+    const int MaxCachedIcons = 256;
     readonly Dictionary<string, ImageSource> _cache = new();
+    readonly Queue<string> _cacheOrder = new();
 
     public ImageSource? GetCached(string path, int size)
     {
@@ -60,6 +62,9 @@ public sealed class IconService
             ?? FromShell(path);
         if (image == null) return null;
         _cache[key] = image;
+        _cacheOrder.Enqueue(key);
+        while (_cacheOrder.Count > MaxCachedIcons)
+            _cache.Remove(_cacheOrder.Dequeue());
         return image;
     }
 

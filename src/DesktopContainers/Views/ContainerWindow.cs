@@ -875,6 +875,9 @@ public sealed class ContainerWindow : Window
         const int WM_SYSCOMMAND = 0x0112;
         const int SC_MINIMIZE = 0xF020;
         const int WM_WINDOWPOSCHANGING = 0x0046;
+        const int WM_DPICHANGED = 0x02E0;
+        if (msg == WM_DPICHANGED)
+            Dispatcher.BeginInvoke(ScheduleRebuild, DispatcherPriority.Loaded);
         if (msg == WM_MOUSEACTIVATE)
         {
             handled = true;

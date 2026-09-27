@@ -10,7 +10,7 @@ public sealed class AppIconView : StackPanel
     readonly ContainerModel _model;
     readonly AppEntry _entry;
     readonly Image _image;
-    readonly TextBlock? _badge;
+    TextBlock? _badge;
     bool _alive = true;
     Point? _down;
 
@@ -88,7 +88,7 @@ public sealed class AppIconView : StackPanel
         host.MouseLeave += (_, _) => Motion.Scale(scale, 1, AppHost.State.Settings.AnimationsEnabled);
 
         ContextMenuOpening += (_, _) => ContextMenu = BuildMenu();
-        LoadIcon();
+        Loaded += (_, _) => LoadIcon();
     }
 
     public void Detach() => _alive = false;
@@ -96,13 +96,16 @@ public sealed class AppIconView : StackPanel
     void LoadIcon()
     {
         var path = AppHost.Shortcuts.PathOf(_entry);
-        var cached = AppHost.Icons.GetCached(path, 256);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var scale = Math.Max(dpi.DpiScaleX, dpi.DpiScaleY);
+        var pixels = Math.Clamp((int)Math.Ceiling(AppHost.IconSize(_model) * scale * 1.1), 32, 256);
+        var cached = AppHost.Icons.GetCached(path, pixels);
         if (cached != null)
         {
             _image.Source = cached;
             return;
         }
-        AppHost.Icons.Load(path, 256, source =>
+        AppHost.Icons.Load(path, pixels, source =>
         {
             if (_alive && source != null)
                 _image.Source = source;
@@ -113,7 +116,7 @@ public sealed class AppIconView : StackPanel
     {
         var menu = new ContextMenu();
         menu.Items.Add(Item("打开", Launch));
-        if (_entry.Missing)
+        if (_entry.Missing && !_model.Locked)
             menu.Items.Add(Item("移除", () => AppHost.State.RemoveMissing(_model, _entry)));
         else if (!_model.Locked)
             menu.Items.Add(Item("移出到桌面", Restore));
@@ -132,11 +135,20 @@ public sealed class AppIconView : StackPanel
 
     void Launch()
     {
-        if (AppHost.Shortcuts.TryLaunch(_entry)) return;
+        if (AppHost.Shortcuts.TryLaunch(_entry))
+        {
+            _image.Opacity = 1;
+            if (_badge != null)
+            {
+                Children.Remove(_badge);
+                _badge = null;
+            }
+            return;
+        }
         _image.Opacity = 0.35;
         if (_badge == null)
         {
-            Children.Add(new TextBlock
+            _badge = new TextBlock
             {
                 Text = "找不到",
                 FontFamily = UiKit.Font,
@@ -144,7 +156,8 @@ public sealed class AppIconView : StackPanel
                 Foreground = Paint.Brush(Paint.Muted),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 2, 0, 0)
-            });
+            };
+            Children.Add(_badge);
         }
     }
 

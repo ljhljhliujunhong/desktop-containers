@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.IO.Compression;
+using System.Text.Json;
 using System.Windows.Threading;
 
 namespace DesktopContainers;
@@ -112,6 +114,7 @@ public sealed class AppState
         var added = 0;
         string? error = null;
         var rejected = 0;
+        var desktopSources = new List<string>();
         foreach (var file in files.Take(300))
         {
             var result = AppHost.Shortcuts.Import(file);
@@ -139,21 +142,28 @@ public sealed class AppState
                     container.Apps.Add(existing);
                     added++;
                 }
-                if (result.DesktopShortcut)
-                    AppHost.Shortcuts.TryDeleteDesktopSource(result.SourcePath);
+                else if (owner != container)
+                {
+                    error ??= "这个应用已经在锁定的容器里";
+                    continue;
+                }
+                if (result.DesktopShortcut && result.SourcePath != null)
+                    desktopSources.Add(result.SourcePath);
                 continue;
             }
 
             container.Apps.Add(entry);
-            if (result.DesktopShortcut)
-                AppHost.Shortcuts.TryDeleteDesktopSource(result.SourcePath);
+            if (result.DesktopShortcut && result.SourcePath != null)
+                desktopSources.Add(result.SourcePath);
             added++;
         }
 
-        if (added > 0)
+        if (added > 0 || desktopSources.Count > 0)
         {
             container.UpdatedUtc = DateTime.UtcNow;
             Flush();
+            foreach (var source in desktopSources.Distinct(StringComparer.OrdinalIgnoreCase))
+                AppHost.Shortcuts.TryDeleteDesktopSource(source);
             return null;
         }
         if (error != null) return error;
@@ -201,6 +211,7 @@ public sealed class AppState
 
     public void RemoveMissing(ContainerModel container, AppEntry app)
     {
+        if (container.Locked) return;
         container.Apps.Remove(app);
         AppHost.Shortcuts.DeleteOwned(app);
         container.UpdatedUtc = DateTime.UtcNow;
@@ -327,24 +338,74 @@ public sealed class AppState
     public string? RestoreFrom(string path)
     {
         LayoutDocument incoming;
+        var addedFiles = new List<string>();
+        var saved = false;
         try
         {
-            incoming = _store.Read(path);
+            if (Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                using var archive = ZipFile.OpenRead(path);
+                var layout = archive.GetEntry("layout.json")
+                    ?? throw new InvalidDataException("备份里没有布局");
+                if (layout.Length > 10 * 1024 * 1024)
+                    throw new InvalidDataException("布局文件过大");
+                using var reader = new StreamReader(layout.Open());
+                incoming = JsonSerializer.Deserialize<LayoutDocument>(reader.ReadToEnd(), JsonOpts.Options)
+                    ?? throw new InvalidDataException("布局文件为空");
+                Normalize(incoming);
+                var entries = archive.Entries
+                    .Where(entry => entry.FullName.StartsWith("shortcuts/", StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(entry => entry.FullName, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.Single(), StringComparer.OrdinalIgnoreCase);
+                var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var app in incoming.Containers.SelectMany(c => c.Apps))
+                {
+                    if (!LayoutStore.SafeShortcutName(app.FileName))
+                        throw new InvalidDataException("备份里有无效的快捷方式文件名");
+                    if (!names.TryGetValue(app.FileName, out var replacement))
+                    {
+                        var key = "shortcuts/" + app.FileName;
+                        if (!entries.TryGetValue(key, out var entry) || entry.Length > 10 * 1024 * 1024)
+                            throw new InvalidDataException("备份缺少快捷方式：" + app.DisplayName);
+                        replacement = Guid.NewGuid().ToString("N") + Path.GetExtension(app.FileName);
+                        var dest = Path.Combine(AppHost.Shortcuts.StoreDir, replacement);
+                        using (var source = entry.Open())
+                        using (var target = new FileStream(dest, FileMode.CreateNew))
+                            source.CopyTo(target);
+                        addedFiles.Add(dest);
+                        names.Add(app.FileName, replacement);
+                    }
+                    app.FileName = replacement;
+                }
+            }
+            else
+            {
+                incoming = _store.Read(path);
+                Normalize(incoming);
+                if (incoming.Containers.SelectMany(c => c.Apps).Any(app =>
+                    !LayoutStore.SafeShortcutName(app.FileName)
+                    || !File.Exists(AppHost.Shortcuts.PathOf(app))))
+                    return "旧布局文件缺少快捷方式，请选择完整备份";
+            }
+
+            _store.Snapshot("before-restore");
+            _store.Save(incoming);
+            saved = true;
         }
         catch (Exception ex)
         {
             Log.Error("restore", ex);
-            return "这个文件读不了";
+            if (!saved)
+                foreach (var file in addedFiles)
+                    try { File.Delete(file); } catch (Exception cleanupEx) { Log.Error("restore cleanup", cleanupEx); }
+            return "这个备份读不了或内容不完整";
         }
 
-        _store.Snapshot("before-restore");
-        Normalize(incoming);
         AppHost.SuppressPersist = true;
         foreach (var window in AppHost.Windows.ToList())
             window.Close();
         AppHost.SuppressPersist = false;
         Document = incoming;
-        _store.Save(Document);
         StartupService.Apply(Settings.LaunchAtStartup);
         foreach (var container in Document.Containers)
             AppHost.OpenContainer(container, false);

@@ -510,7 +510,7 @@ public partial class ManagerWindow
                     }, at < container.Apps.Count - 1));
                 }
                 if (app.Missing)
-                    ops.Children.Add(Small("移除", () => { AppHost.State.RemoveMissing(container, app); Navigate("containers"); }, true));
+                    ops.Children.Add(Small("移除", () => { AppHost.State.RemoveMissing(container, app); Navigate("containers"); }, !container.Locked));
                 else
                     ops.Children.Add(Small("移出", () =>
                     {
@@ -1130,14 +1130,14 @@ public partial class ManagerWindow
     {
         var dialog = new SaveFileDialog
         {
-            Filter = "布局文件|*.json",
-            FileName = Brand.Name + "-布局.json"
+            Filter = "莓格备份|*.zip",
+            FileName = Brand.Name + "-备份.zip"
         };
         if (dialog.ShowDialog(this) != true) return;
         try
         {
             AppHost.State.Flush();
-            File.Copy(AppHost.Store.LayoutPath, dialog.FileName, true);
+            AppHost.Store.ExportBundle(dialog.FileName, AppHost.State.Document);
         }
         catch (Exception ex)
         {
@@ -1148,7 +1148,7 @@ public partial class ManagerWindow
 
     void Restore()
     {
-        var dialog = new OpenFileDialog { Filter = "布局文件|*.json" };
+        var dialog = new OpenFileDialog { Filter = "莓格备份|*.zip|旧布局文件|*.json" };
         if (dialog.ShowDialog(this) != true) return;
         if (!MiniDialog.Confirm(this, "恢复布局", "用这个备份换掉现在的布局？", "恢复"))
             return;

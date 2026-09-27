@@ -36,6 +36,7 @@ public sealed class ShortcutService
 
     public ImportOne Import(string sourcePath)
     {
+        string? dest = null;
         try
         {
             if (string.IsNullOrWhiteSpace(sourcePath) || !File.Exists(sourcePath))
@@ -52,7 +53,7 @@ public sealed class ShortcutService
 
             var id = Guid.NewGuid().ToString("N");
             var destExt = ext == ".exe" ? ".lnk" : ext;
-            var dest = Path.Combine(StoreDir, id + destExt);
+            dest = Path.Combine(StoreDir, id + destExt);
             if (ext == ".exe")
                 CreateExeShortcut(dest, full);
             else
@@ -78,6 +79,11 @@ public sealed class ShortcutService
         }
         catch (Exception ex)
         {
+            if (dest != null)
+            {
+                try { File.Delete(dest); }
+                catch (Exception cleanupEx) { Log.Error("import cleanup", cleanupEx); }
+            }
             Log.Error("import", ex);
             return ImportOne.Fail("没能放进来");
         }

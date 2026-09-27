@@ -99,23 +99,38 @@ public static class SmokeTest
                     var reloaded = new LayoutStore(AppHost.DataRoot).Load();
                     var notepadStillThere = File.Exists(Path.Combine(Environment.SystemDirectory, "notepad.exe"));
                     var stored = entry != null && File.Exists(AppHost.Shortcuts.PathOf(entry));
+                    var z = DesktopPlacement.Describe(hwnd);
+                    var backupOk = false;
+                    if (entry != null && stored)
+                    {
+                        var backup = Path.Combine(AppHost.DataRoot, "smoke-backup.zip");
+                        AppHost.Store.ExportBundle(backup, AppHost.State.Document);
+                        File.Delete(AppHost.Shortcuts.PathOf(entry));
+                        var restoreError = AppHost.State.RestoreFrom(backup);
+                        var restored = AppHost.State.Document.Containers.FirstOrDefault()?.Apps.FirstOrDefault();
+                        backupOk = restoreError == null && restored != null
+                            && File.Exists(AppHost.Shortcuts.PathOf(restored));
+                    }
+                    var recoveryOk = CheckRecovery();
                     var text = string.Join(Environment.NewLine,
                     [
                         "above=" + above,
                         "icon=" + iconOk,
                         "stored=" + stored,
+                        "backupRestore=" + backupOk,
+                        "recovery=" + recoveryOk,
                         "notepad=" + notepadStillThere,
                         "import=" + (importError ?? "ok"),
                         "apps=" + container.Apps.Count,
                         "reloadContainers=" + reloaded.Containers.Count,
                         "reloadApps=" + reloaded.Containers.FirstOrDefault()?.Apps.Count,
                         "name=" + reloaded.Containers.FirstOrDefault()?.Name,
-                        "z=" + DesktopPlacement.Describe(hwnd),
+                        "z=" + z,
                         "os=" + Environment.OSVersion.VersionString,
                         "size=" + window.ActualWidth + "x" + window.ActualHeight
                     ]);
                     File.WriteAllText(report, text, new UTF8Encoding(false));
-                    var ok = above && iconOk && stored && notepadStillThere && importError == null
+                    var ok = above && iconOk && stored && backupOk && recoveryOk && notepadStillThere && importError == null
                         && reloaded.Containers.Count == 2
                         && reloaded.Containers[0].Apps.Count == 1
                         && reloaded.Containers[0].Name == "AI 应用";
@@ -150,6 +165,20 @@ public static class SmokeTest
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path);
         encoder.Save(stream);
+    }
+
+    static bool CheckRecovery()
+    {
+        var store = new LayoutStore(Path.Combine(AppHost.DataRoot, "recovery-check"));
+        File.WriteAllText(store.LayoutPath, "{");
+        File.WriteAllText(store.BackupPath, "{");
+        var older = Path.Combine(store.BackupDir, "layout-older.json");
+        var newer = Path.Combine(store.BackupDir, "layout-newer.json");
+        File.WriteAllText(older, "{\"containers\":[{\"name\":\"已恢复\"}]}");
+        File.WriteAllText(newer, "{");
+        File.SetLastWriteTimeUtc(older, DateTime.UtcNow.AddMinutes(-2));
+        File.SetLastWriteTimeUtc(newer, DateTime.UtcNow.AddMinutes(-1));
+        return store.Load().Containers.FirstOrDefault()?.Name == "已恢复";
     }
 
     static void CopyScreen(Window window, string path)

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.IO.Compression;
 
 namespace DesktopContainers;
 
@@ -22,34 +23,25 @@ public sealed class LayoutStore
 
     public LayoutDocument Load()
     {
-        if (!File.Exists(LayoutPath))
-            return new LayoutDocument();
-        try
+        var candidates = new List<string>();
+        if (File.Exists(LayoutPath)) candidates.Add(LayoutPath);
+        if (File.Exists(BackupPath)) candidates.Add(BackupPath);
+        candidates.AddRange(Directory.GetFiles(BackupDir, "layout-*.json")
+            .OrderByDescending(File.GetLastWriteTimeUtc));
+        foreach (var candidate in candidates)
         {
-            return Read(LayoutPath);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("layout", ex);
             try
             {
-                if (File.Exists(BackupPath))
-                    return Read(BackupPath);
+                return Read(candidate);
             }
-            catch (Exception bakEx)
+            catch (Exception ex)
             {
-                Log.Error("layout.bak", bakEx);
+                Log.Error("layout " + candidate, ex);
             }
+        }
 
-            var newest = Directory.GetFiles(BackupDir, "layout-*.json")
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-            if (newest != null)
-            {
-                try { return Read(newest); }
-                catch (Exception snapEx) { Log.Error("layout snapshot", snapEx); }
-            }
-
+        if (File.Exists(LayoutPath))
+        {
             try
             {
                 File.Copy(LayoutPath, LayoutPath + ".bad", true);
@@ -58,15 +50,44 @@ public sealed class LayoutStore
             {
                 Log.Error("layout.bad", copyEx);
             }
-            return new LayoutDocument();
         }
+        return new LayoutDocument();
     }
 
     public LayoutDocument Read(string path)
     {
         var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<LayoutDocument>(json, JsonOpts.Options) ?? new LayoutDocument();
+        return JsonSerializer.Deserialize<LayoutDocument>(json, JsonOpts.Options)
+            ?? throw new InvalidDataException("布局文件为空");
     }
+
+    public void ExportBundle(string path, LayoutDocument document)
+    {
+        using var memory = new MemoryStream();
+        using (var archive = new ZipArchive(memory, ZipArchiveMode.Create, true))
+        {
+            var layout = archive.CreateEntry("layout.json", CompressionLevel.Optimal);
+            using (var writer = new StreamWriter(layout.Open()))
+                writer.Write(JsonSerializer.Serialize(document, JsonOpts.Options));
+
+            foreach (var name in document.Containers.SelectMany(c => c.Apps).Select(a => a.FileName)
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!SafeShortcutName(name))
+                    throw new InvalidDataException("布局里有无效的快捷方式文件名");
+                var source = Path.Combine(Root, "shortcuts", name);
+                if (!File.Exists(source))
+                    throw new FileNotFoundException("备份缺少快捷方式", source);
+                archive.CreateEntryFromFile(source, "shortcuts/" + name, CompressionLevel.Optimal);
+            }
+        }
+        File.WriteAllBytes(path, memory.ToArray());
+    }
+
+    public static bool SafeShortcutName(string? name) =>
+        !string.IsNullOrWhiteSpace(name)
+        && name == Path.GetFileName(name)
+        && Path.GetExtension(name).ToLowerInvariant() is ".lnk" or ".url";
 
     public void Save(LayoutDocument document)
     {
