@@ -16,6 +16,7 @@ public static class SmokeTest
         var report = Path.Combine(AppHost.DataRoot, "smoke-report.txt");
         try
         {
+            DisplayReflow.Check();
             if (!AppHost.DataRoot.Contains("AgentCache", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("smoke 拒绝使用这个数据目录");
 

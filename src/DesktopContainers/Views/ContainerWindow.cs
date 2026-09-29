@@ -53,6 +53,8 @@ public sealed class ContainerWindow : Window
 
     public ContainerModel Model { get; }
 
+    public bool IsGesture => _dragging || _resizing || _armDrag;
+
     public ContainerWindow(ContainerModel model, bool placeOnCursor, int stagger)
     {
         Model = model;
@@ -826,6 +828,72 @@ public sealed class ContainerWindow : Window
         return frame;
     }
 
+    public void ApplyPixelBounds(int x, int y, int w, int h, bool resize)
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        var flags = NativeMethods.SWP_NOZORDER | NativeMethods.SWP_NOACTIVATE;
+        if (!resize) flags |= NativeMethods.SWP_NOSIZE;
+        NativeMethods.SetWindowPos(hwnd, IntPtr.Zero, x, y, Math.Max(1, w), Math.Max(1, h), flags);
+    }
+
+    public void RememberDip(double width, double height)
+    {
+        if (width < 96 || height < 96) return;
+        if (Math.Abs(Width - width) < 0.5 && Math.Abs(Height - height) < 0.5) return;
+        Width = width;
+        Height = height;
+    }
+
+    public bool FitInside(int maxPixelW, int maxPixelH)
+    {
+        if (_fitting || _resizing) return false;
+        if (Model.Apps.Count == 0 || maxPixelW < 80 || maxPixelH < 80) return false;
+        _fitting = true;
+        try
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            var dpi = hwnd == IntPtr.Zero ? 96u : NativeMethods.GetDpiForWindow(hwnd);
+            if (dpi < 48) dpi = 96;
+            var maxDipW = maxPixelW * 96.0 / dpi;
+            var maxDipH = maxPixelH * 96.0 / dpi;
+            MeasureCells();
+            var count = Model.Apps.Count;
+            if (count < 1 || _cellW < 1 || _cellH < 1) return false;
+            var bestFit = -1;
+            var bestFitArea = -1.0;
+            var smallest = 1;
+            var smallestArea = double.MaxValue;
+            for (var columns = 1; columns <= count; columns++)
+            {
+                var rows = (count + columns - 1) / columns;
+                var width = WindowWidth(columns);
+                var height = WindowHeight(columns, rows);
+                var area = width * height;
+                if (area < smallestArea)
+                {
+                    smallestArea = area;
+                    smallest = columns;
+                }
+                if (width <= maxDipW + 0.5 && height <= maxDipH + 0.5 && area > bestFitArea)
+                {
+                    bestFitArea = area;
+                    bestFit = columns;
+                }
+            }
+            var beforeW = Width;
+            var beforeH = Height;
+            ApplyArrangement(bestFit > 0 ? bestFit : smallest);
+            return Math.Abs(Width - beforeW) > 0.5 || Math.Abs(Height - beforeH) > 0.5;
+        }
+        finally
+        {
+            _fitting = false;
+        }
+    }
+
+    public void CommitBounds() => PersistBounds();
+
     void PersistBounds()
     {
         if (AppHost.SuppressPersist || Width < 10 || Height < 10) return;
@@ -834,6 +902,8 @@ public sealed class ContainerWindow : Window
         {
             Model.PixelX = rect.Left;
             Model.PixelY = rect.Top;
+            Model.PixelWidth = Math.Max(0, rect.Right - rect.Left);
+            Model.PixelHeight = Math.Max(0, rect.Bottom - rect.Top);
             Model.HasPixelPosition = true;
             Model.MonitorDevice = MonitorGuard.DeviceName(this);
         }
@@ -842,6 +912,7 @@ public sealed class ContainerWindow : Window
         Model.Width = Width;
         Model.Height = Height;
         Model.UpdatedUtc = DateTime.UtcNow;
+        DisplayMemory.Note(Model);
         AppHost.State.RequestSave();
     }
 

@@ -462,6 +462,7 @@ public sealed class AppState
         document.Settings ??= new AppSettings();
         document.CustomThemes ??= new ObservableCollection<ThemeDefinition>();
         document.Containers ??= new ObservableCollection<ContainerModel>();
+        document.ScreenLayouts = NormalizeLayouts(document.ScreenLayouts);
         if (document.Version <= 0) document.Version = 1;
         if (document.Settings.DefaultIconSize is < 32 or > 96)
             document.Settings.DefaultIconSize = 56;
@@ -512,6 +513,39 @@ public sealed class AppState
                     app.FileName = app.Id + ".lnk";
             }
         }
+    }
+
+    static List<ScreenLayout> NormalizeLayouts(List<ScreenLayout>? layouts)
+    {
+        var kept = new List<ScreenLayout>();
+        if (layouts == null) return kept;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = layouts.Count - 1; i >= 0 && kept.Count < 8; i--)
+        {
+            var layout = layouts[i];
+            if (layout == null || string.IsNullOrWhiteSpace(layout.Key) || !seen.Add(layout.Key))
+                continue;
+            layout.Spots = NormalizeSpots(layout.Spots);
+            kept.Add(layout);
+        }
+        kept.Reverse();
+        return kept;
+    }
+
+    static List<ContainerSpot> NormalizeSpots(List<ContainerSpot>? spots)
+    {
+        var kept = new List<ContainerSpot>();
+        if (spots == null) return kept;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = spots.Count - 1; i >= 0; i--)
+        {
+            var spot = spots[i];
+            if (spot == null || string.IsNullOrWhiteSpace(spot.Id) || !seen.Add(spot.Id))
+                continue;
+            kept.Add(spot);
+        }
+        kept.Reverse();
+        return kept;
     }
 
     static double NearestIconSize(double value)

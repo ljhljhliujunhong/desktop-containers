@@ -125,6 +125,8 @@ public sealed class ContainerModel : ObservableObject
     public double Height { get; set; } = 320;
     public int PixelX { get; set; }
     public int PixelY { get; set; }
+    public int PixelWidth { get; set; }
+    public int PixelHeight { get; set; }
     public bool HasPixelPosition { get; set; }
     public string? MonitorDevice { get; set; }
     public bool Locked { get => _locked; set => Set(ref _locked, value); }
@@ -164,6 +166,26 @@ public sealed class LayoutDocument
     public AppSettings Settings { get; set; } = new();
     public ObservableCollection<ThemeDefinition> CustomThemes { get; set; } = new();
     public ObservableCollection<ContainerModel> Containers { get; set; } = new();
+    public List<ScreenLayout> ScreenLayouts { get; set; } = new();
+}
+
+public sealed class ScreenLayout
+{
+    public string Key { get; set; } = "";
+    public List<ContainerSpot> Spots { get; set; } = new();
+}
+
+public sealed class ContainerSpot
+{
+    public string Id { get; set; } = "";
+    public int PixelX { get; set; }
+    public int PixelY { get; set; }
+    public int PixelWidth { get; set; }
+    public int PixelHeight { get; set; }
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
 }
 
 public static class Paint

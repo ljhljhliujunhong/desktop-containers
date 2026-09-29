@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using Microsoft.Win32;
 
 namespace DesktopContainers;
@@ -53,6 +54,12 @@ public static class AppHost
 
     public static void Start(string[] args)
     {
+        if (args.Contains("--reflow-check"))
+        {
+            RunReflowCheck();
+            return;
+        }
+
         var export = Array.IndexOf(args, "--export-icon");
         if (export >= 0)
         {
@@ -94,9 +101,12 @@ public static class AppHost
         DesktopPlacement.Install();
         SystemEvents.DisplaySettingsChanged += OnDisplaySettings;
         SystemEvents.SessionEnding += OnSessionEnding;
+        DisplayMemory.BindCurrent();
 
         foreach (var container in State.Document.Containers.ToList())
             OpenContainer(container, false);
+
+        Application.Current.Dispatcher.BeginInvoke(DisplayMemory.RepairIfPiled, DispatcherPriority.ApplicationIdle);
 
         Tray = new TrayController();
         BrandIcon.SaveCanonical();
@@ -170,6 +180,7 @@ public static class AppHost
     {
         if (IsExiting) return;
         IsExiting = true;
+        DisplayMemory.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettings;
         SystemEvents.SessionEnding -= OnSessionEnding;
         try { State?.Flush(); } catch (Exception ex) { Log.Error("flush", ex); }
@@ -181,13 +192,20 @@ public static class AppHost
         Application.Current?.Shutdown();
     }
 
-    static void OnDisplaySettings(object? sender, EventArgs e)
+    static void OnDisplaySettings(object? sender, EventArgs e) => DisplayMemory.OnDisplayChanged();
+
+    static void RunReflowCheck()
     {
-        Application.Current?.Dispatcher.BeginInvoke(() =>
+        try
         {
-            foreach (var window in _windows.ToList())
-                window.ClampAndSave();
-        });
+            DisplayReflow.Check();
+            Environment.Exit(0);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            Environment.Exit(1);
+        }
     }
 
     static void OnSessionEnding(object sender, SessionEndingEventArgs e)

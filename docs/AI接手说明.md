@@ -106,6 +106,7 @@ Copy-Item "$stage\DesktopContainers.exe" 'E:\VsCodeProject\桌面容器\app\Desk
 | `--data <目录>` | 数据根目录。也可用环境变量 `DESKTOP_CONTAINERS_HOME` |
 | `--startup` | 开机启动：只显示容器，不打开管理窗口和首次引导 |
 | `--smoke` | 冒烟测试，跑完退出 |
+| `--reflow-check` | 只跑排列自检然后退出 |
 
 `UseWindowsForms` 会注入 `System.Drawing` 和 `System.Windows.Forms` 的全局 using，和 WPF 的 `Color`、`Button`、`Image` 撞名。项目文件里已经 `Using Remove` 掉这两个，并补了 `System.IO`（这个 SDK 的隐式 using 不含 IO）。新文件不要再全局引入 WinForms。需要 `Screen` 或 `NotifyIcon` 时写全名。
 
@@ -123,7 +124,7 @@ logs\app.log
 
 保存是临时文件 + `File.Replace`，再留 `.bak`。读失败先试 `.bak`，再按时间逐份尝试 `backups`。JSON 是 camelCase、缩进、`UnsafeRelaxedJsonEscaping`（中文可读）、字符串枚举，`version` 为 1。
 
-位置同时存 WPF DIP（`x` `y` `width` `height`）和物理像素（`pixelX` `pixelY` `hasPixelPosition`）以及 `monitorDevice`。还原用 `SetWindowPos` + `SWP_NOZORDER`。可见区域小于 80×80 物理像素时夹回最近的工作区。
+位置同时存 WPF DIP（`x` `y` `width` `height`）和物理像素（`pixelX` `pixelY` `pixelWidth` `pixelHeight` `hasPixelPosition`）以及 `monitorDevice`。还原用 `SetWindowPos` + `SWP_NOZORDER`。`screenLayouts` 按显示器边界（不含任务栏）最多记 8 套排列。切换时先冻结旧坐标，避免系统把窗口堆到剩下的屏幕上之后把好位置覆盖掉。新排列里能对上的就搬回去；对不上的按工作区重新排开，排不开再缩小列数。可见区域仍然小于 80×80 物理像素时，新建过程里的 `MonitorGuard` 会夹回最近的工作区。
 
 快捷方式规则：
 
@@ -148,7 +149,7 @@ logs\app.log
 - 锁定的容器仍可启动，但不能改布局，也不能拖动。往里丢文件在未锁定时一直可以。
 - 拖容器的起点不能是图标、按钮或缩放区域。移动超过约 6 像素才开始拖。图标拖动阈值是 8 像素，而且只在编辑模式、未锁定时。拖动时靠近别的容器的边或中线会吸住，并画出虚线；左右或上下空隙如果和已有空隙一样，也会吸住，空隙中间有虚线。松手后虚线消失。对齐按玻璃卡片的外缘算，不按窗口阴影。
 - 拖放自定义格式是 `DesktopContainers.AppDrag`，内容是 `containerId|appId`。`DragSession` 把真正的 `MoveApp` 推迟到 `DoDragDrop` 返回之后。只有没被某个容器吃掉、没取消、并且光标不在任何容器里，才移回桌面。同一容器里重排时，先移除再按新索引插入。
-- 新容器默认按 3 列错开（约 468×344 DIP）。若仍和已有容器大面积重叠，`MonitorGuard.NudgeApart` 再挪。已保存过像素位置的容器不再自动挪开。
+- 新容器默认按 3 列错开（约 468×344 DIP）。还没有像素位置时，若和已有容器大面积重叠，`MonitorGuard.NudgeApart` 再挪。平时拖好的位置会留在原来的屏幕坐标上。换分辨率、拔掉或接回显示器时，用那一套屏幕记下的位置；没记过的，就在当前屏幕里散开。启动时叠得很厉害的，会散开一次。
 - 容器大小按里面的图标格子对齐。最宽是全部排成一行，最高是全部排成一列，中间只能停在完整的列数上。没有图标时保持 440×320。容器里不出现滚动条。图标尺寸：小 40、中 56、大 80，滑条 32–96。
 - 标题位置：`Top` `Bottom` `TopLeft` `Center` `Hidden`。
 - 布局变更走 `RequestSave`，400ms 防抖；删除、导入、退出、关机用 `Flush`。
@@ -187,7 +188,7 @@ logs\app.log
 | 快捷方式复制、删除、还原、启动 | `Services\ShortcutService.cs` |
 | 图标抽取 | `Services\IconService.cs` |
 | 谁在桌面图标上面 | `Services\DesktopPlacement.cs` |
-| 多显示器夹取、新容器错开 | `Services\MonitorGuard.cs` |
+| 显示器排列记忆、散开和还原 | `Services\DisplayMemory.cs`、`Services\DisplayReflow.cs`、`Services\MonitorGuard.cs` |
 | 容器外观、拖动和按格子缩放 | `Views\ContainerWindow.cs`、`Views\CornerGrip.cs` |
 | 产品名和标志 | `Views\BrandIcon.cs` |
 | 图标单击、双击、拖出 | `Views\AppIconView.cs`、`Views\DragSession.cs` |
