@@ -21,7 +21,9 @@ Windows 桌面上始终展开的应用分组。用户建一个有名字的容器
 - 数据是 `%AppData%\DesktopContainers` 下的 JSON 和快捷方式文件。
 - 日常编译是依赖本机运行时的 Release。给用户双击和开机启动用的是自包含发布，输出在仓库根目录的 `app\`（已被 gitignore）。登录时系统不会带上 `DOTNET_ROOT`，所以注册表必须指向自包含的 exe。
 
-不要把容器 `SetParent` 到 `Progman` 或 `WorkerW`。这台机器是 Windows `10.0.26200`（Win11 24H2 及以后）。`Progman` 带 `WS_EX_NOREDIRECTIONBITMAP`，透明 WPF 子窗口经常画不出来，也收不到点击。当前做法是顶层分层窗口（`AllowsTransparency` + `WindowStyle.None`），加上 `WS_EX_TOOLWINDOW`，不进任务栏和 Alt-Tab。用 `SetWindowPos` 和 `EVENT_SYSTEM_FOREGROUND` 钩子，把容器压在 `Progman` 上面、普通窗口下面。
+不要把容器 `SetParent` 到 `Progman` 或 `WorkerW`。这台机器是 Windows `10.0.26200`（Win11 24H2 及以后）。`Progman` 带 `WS_EX_NOREDIRECTIONBITMAP`，透明 WPF 子窗口经常画不出来，也收不到点击。当前做法是顶层分层窗口（`AllowsTransparency` + `WindowStyle.None`），加上 `WS_EX_TOOLWINDOW`，不进任务栏和 Alt-Tab。`DesktopPlacement` 同时监听前台切换、窗口显示/隐藏、顶层重排、恢复和解除隐藏；只在层级实际不符时用 `SetWindowPos` 修正。层级检查最多合并到 50ms 一次，空闲时没有轮询。
+
+层级必须低于所有可见、未最小化、未被 DWM 隐藏的应用窗口，并且不能带 `WS_EX_TOPMOST`。识别桌面用 `GetShellWindow` 和同一个 Explorer 进程的 `Progman` / `WorkerW`。桌面临时被系统抬高时，优先保持低于应用。容器的 `WM_WINDOWPOSCHANGING` 会同步约束提层请求；不能把置顶窗口拿来作为插入参照，也不能在找不到桌面时退回 `HWND_TOP`（此时用 `HWND_BOTTOM`）。顶层重排事件的来源是 `GetDesktopWindow()`、`OBJID_CLIENT=-4`，不能只接受 `idObject=0`。
 
 `WM_MOUSEACTIVATE` 返回 `MA_NOACTIVATE`（3），不要返回 `MA_NOACTIVATEANDEAT`。不要加 `WS_EX_NOACTIVATE`，否则 OLE 拖放会坏。`SetWindowPos` 只改位置时必须带 `SWP_NOZORDER`：`HWND_TOP` 的值是 `IntPtr.Zero`，漏了这个标志会把窗口甩到最前。
 
@@ -147,6 +149,7 @@ logs\app.log
 - 普通模式：双击启动，可以往容器里丢文件，右键菜单可用，也可以拖动容器位置。不能改图标顺序，不能缩放。
 - 编辑模式：拖容器、右下角缩放、容器之间拖图标、拖到外面回到桌面、标题双击改名。缩放区域没有图标，只有透明命中区和斜向光标（`CornerGrip`）。
 - 锁定的容器仍可启动，但不能改布局，也不能拖动。往里丢文件在未锁定时一直可以。
+- 拖动/缩放不暂停层级维护；鼠标捕获丢失也会结束操作并清理辅助线。
 - 拖容器的起点不能是图标、按钮或缩放区域。移动超过约 6 像素才开始拖。图标拖动阈值是 8 像素，而且只在编辑模式、未锁定时。拖动时靠近别的容器的边或中线会吸住，并画出虚线；左右或上下空隙如果和已有空隙一样，也会吸住，空隙中间有虚线。松手后虚线消失。对齐按玻璃卡片的外缘算，不按窗口阴影。
 - 拖放自定义格式是 `DesktopContainers.AppDrag`，内容是 `containerId|appId`。`DragSession` 把真正的 `MoveApp` 推迟到 `DoDragDrop` 返回之后。只有没被某个容器吃掉、没取消、并且光标不在任何容器里，才移回桌面。同一容器里重排时，先移除再按新索引插入。
 - 新容器默认按 3 列错开（约 468×344 DIP）。还没有像素位置时，若和已有容器大面积重叠，`MonitorGuard.NudgeApart` 再挪。平时拖好的位置会留在原来的屏幕坐标上。换分辨率、拔掉或接回显示器时，用那一套屏幕记下的位置；没记过的，就在当前屏幕里散开。启动时叠得很厉害的，会散开一次。
@@ -217,5 +220,5 @@ logs\app.log
 - 没有资源管理器的桌面右键扩展。拖进容器、从容器拖出，是本程序窗口上的拖放。
 - 「显示桌面」只能尽量不让容器被最小化，不能保证所有系统版本都一样。
 - 透明容器是软件渲染，窗口多时比普通 WPF 窗口更吃 CPU，但空闲时应停在接近 0。
-- 冒烟证明：容器在 `Progman` 之上、记事本图标能抽出、快捷方式进了库且原 exe 还在、重读布局得到 2 个容器、完整备份能恢复已删的库内快捷方式。它不覆盖拖放、锁定、删除回桌面、开机启动注册表。
-- 层级若再出问题：冒烟里 `above=false`，或屏幕截图被别的窗口整块挡住。可以改成贴在 `Progman` 和顶层 `WorkerW` 中更高的那个之上，仍然不要 `HWND_TOP` 盖住用户正在用的程序。`container.png` 是 `RenderTargetBitmap`，看控件本身；`container-screen.png` 是 `CopyFromScreen`，看它在桌面上的真实叠放。
+- 冒烟证明：容器在桌面之上、应用显示和不切换前台的重排后容器仍在应用下方、提层请求不会把容器置顶、应用隐藏后回到桌面上方；记事本图标能抽出、快捷方式进了库且原 exe 还在、重读布局得到 2 个容器、完整备份能恢复已删的库内快捷方式。它不覆盖拖放、锁定、删除回桌面、开机启动注册表。
+- 层级诊断看冒烟报告里的 `above`、`layering` 与 `topmost`。`container.png` 是 `RenderTargetBitmap`，看控件本身；`container-screen.png` 是 `CopyFromScreen`，看它在桌面上的真实叠放。普通应用盖住容器是预期行为。

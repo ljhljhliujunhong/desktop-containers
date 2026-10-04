@@ -88,11 +88,12 @@ public static class SmokeTest
             window.ShowGlass(false);
             manager.Hide();
 
-            Application.Current.Dispatcher.BeginInvoke(() =>
+            Application.Current.Dispatcher.BeginInvoke(async () =>
             {
                 try
                 {
                     CopyScreen(window, Path.Combine(AppHost.DataRoot, "container-screen.png"));
+                    await CheckLayering(window);
                     var hwnd = new WindowInteropHelper(window).Handle;
                     var above = DesktopPlacement.IsAboveDesktop(hwnd);
                     var entry = container.Apps.FirstOrDefault();
@@ -116,6 +117,7 @@ public static class SmokeTest
                     var text = string.Join(Environment.NewLine,
                     [
                         "above=" + above,
+                        "layering=ok",
                         "icon=" + iconOk,
                         "stored=" + stored,
                         "backupRestore=" + backupOk,
@@ -180,6 +182,68 @@ public static class SmokeTest
         File.SetLastWriteTimeUtc(older, DateTime.UtcNow.AddMinutes(-2));
         File.SetLastWriteTimeUtc(newer, DateTime.UtcNow.AddMinutes(-1));
         return store.Load().Containers.FirstOrDefault()?.Name == "已恢复";
+    }
+
+    static async Task CheckLayering(ContainerWindow container)
+    {
+        var probe = new Window
+        {
+            Title = "Layering check", Width = 180, Height = 100,
+            ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.ToolWindow
+        };
+        var flags = NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE;
+        try
+        {
+            probe.Show();
+            var probeHwnd = new WindowInteropHelper(probe).Handle;
+            var containerHwnd = new WindowInteropHelper(container).Handle;
+            await Task.Delay(180);
+            CheckBelowProbe("show");
+
+            // 应用重排但前台不变：旧逻辑只监听前台切换，会漏掉这个场景。
+            var foreground = NativeMethods.GetForegroundWindow();
+            NativeMethods.SetWindowPos(probeHwnd, NativeMethods.HWND_BOTTOM, 0, 0, 0, 0, flags);
+            await Task.Delay(180);
+            CheckBelowProbe("reorder without activation");
+            if (NativeMethods.GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("layering changed foreground");
+
+            NativeMethods.SetWindowPos(probeHwnd, IntPtr.Zero, 0, 0, 0, 0, flags);
+            await Task.Delay(180);
+            CheckBelowProbe("restore order");
+            if (!DesktopPlacement.IsAboveDesktop(containerHwnd))
+                throw new InvalidOperationException("layering did not restore above desktop");
+
+            probe.Topmost = true;
+            await Task.Delay(100);
+            // 显式提层也必须被容器的 WINDOWPOS 约束同步挡住。
+            NativeMethods.SetWindowPos(containerHwnd, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0, flags);
+            if (DesktopPlacement.IsTopmost(containerHwnd))
+                throw new InvalidOperationException("layering allowed topmost container");
+            CheckBelowProbe("topmost request");
+
+            probe.Hide();
+            await Task.Delay(180);
+            if (!DesktopPlacement.IsAboveDesktop(containerHwnd))
+                throw new InvalidOperationException("layering did not recover after hide");
+
+            void CheckBelowProbe(string stage)
+            {
+                foreach (var window in AppHost.Windows)
+                {
+                    var hwnd = new WindowInteropHelper(window).Handle;
+                    var found = false;
+                    var seen = new HashSet<IntPtr>();
+                    for (var cursor = NativeMethods.GetWindow(probeHwnd, NativeMethods.GW_HWNDNEXT);
+                         cursor != IntPtr.Zero && seen.Count < 2048 && seen.Add(cursor);
+                         cursor = NativeMethods.GetWindow(cursor, NativeMethods.GW_HWNDNEXT))
+                        if (cursor == hwnd) { found = true; break; }
+                    if (!found || DesktopPlacement.IsTopmost(hwnd))
+                        throw new InvalidOperationException("layering failed: " + stage);
+                }
+            }
+        }
+        finally { probe.Close(); }
     }
 
     static void CopyScreen(Window window, string path)

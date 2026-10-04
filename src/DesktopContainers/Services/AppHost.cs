@@ -180,6 +180,7 @@ public static class AppHost
     {
         if (IsExiting) return;
         IsExiting = true;
+        DesktopPlacement.Stop();
         DisplayMemory.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettings;
         SystemEvents.SessionEnding -= OnSessionEnding;

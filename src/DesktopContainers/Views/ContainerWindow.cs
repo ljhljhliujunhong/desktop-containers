@@ -312,6 +312,7 @@ public sealed class ContainerWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        EndInteraction();
         _glass.Stop();
         DesktopPlacement.Unregister(new WindowInteropHelper(this).Handle);
         if (!AppHost.SuppressPersist)
@@ -354,8 +355,7 @@ public sealed class ContainerWindow : Window
         if (Math.Abs(now.X - _armPoint.X) + Math.Abs(now.Y - _armPoint.Y) < 6) return;
         _dragging = true;
         _armDrag = false;
-        DesktopPlacement.Suspend = true;
-        CaptureMouse();
+        if (!CaptureMouse()) _dragging = false;
     }
 
     protected override void OnPreviewMouseLeftButtonUp(MouseButtonEventArgs e)
@@ -363,10 +363,24 @@ public sealed class ContainerWindow : Window
         base.OnPreviewMouseLeftButtonUp(e);
         _armDrag = false;
         if (!_dragging) return;
+        EndInteraction();
+    }
+
+    protected override void OnLostMouseCapture(MouseEventArgs e)
+    {
+        base.OnLostMouseCapture(e);
+        if (_dragging || _resizing) EndInteraction();
+    }
+
+    void EndInteraction()
+    {
+        if (!_dragging && !_resizing) return;
         _dragging = false;
+        _resizing = false;
+        _armDrag = false;
         AlignGuides.Hide();
+        if (_grip.IsMouseCaptured) _grip.ReleaseMouseCapture();
         if (IsMouseCaptured) ReleaseMouseCapture();
-        DesktopPlacement.Suspend = false;
         DesktopPlacement.PinAll();
         PersistBounds();
     }
@@ -677,8 +691,7 @@ public sealed class ContainerWindow : Window
         NativeMethods.GetCursorPos(out _resizeStart);
         _originWidth = Width;
         _originHeight = Height;
-        _grip.CaptureMouse();
-        DesktopPlacement.Suspend = true;
+        if (!_grip.CaptureMouse()) _resizing = false;
         e.Handled = true;
     }
 
@@ -694,11 +707,7 @@ public sealed class ContainerWindow : Window
     void OnGripUp(object sender, MouseButtonEventArgs e)
     {
         if (!_resizing) return;
-        _resizing = false;
-        _grip.ReleaseMouseCapture();
-        DesktopPlacement.Suspend = false;
-        DesktopPlacement.PinAll();
-        PersistBounds();
+        EndInteraction();
         e.Handled = true;
     }
 
@@ -962,11 +971,12 @@ public sealed class ContainerWindow : Window
         if (msg == WM_WINDOWPOSCHANGING)
         {
             var pos = Marshal.PtrToStructure<NativeMethods.WINDOWPOS>(lParam);
+            DesktopPlacement.Constrain(ref pos);
             if (pos.x == -32000 || pos.y == -32000)
             {
                 pos.flags |= NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE;
-                Marshal.StructureToPtr(pos, lParam, false);
             }
+            Marshal.StructureToPtr(pos, lParam, false);
         }
         return IntPtr.Zero;
     }
