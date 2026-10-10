@@ -8,7 +8,7 @@ Windows 桌面上始终展开的应用分组。用户建一个有名字的容器
 
 它不是文件夹，也不是壁纸窗口。图标必须能点，所以容器要盖在桌面图标上面，又要躲在普通窗口下面。
 
-另有一个管理窗口：首页、容器、主题、设置。第一次打开会先问容器名字和主题。托盘可以打开管理窗口、开关编辑模式、新建容器、退出。关掉管理窗口只是隐藏，托盘里的「退出」才结束进程。
+另有一个管理窗口：首页、容器、布局、主题、设置。第一次打开会先问容器名字和主题。托盘可以打开管理窗口、布局页、开关编辑模式、新建容器、退出。关掉管理窗口只是隐藏，托盘里的「退出」才结束进程。
 
 界面对用户显示的产品名是「莓格」，英文名是 BerryGrid（`Brand.Name` / `Brand.EnglishName`）。管理窗口顶栏只写这个名字，不放标志图。标志原图是仓库根目录的 `EXELogo.png`，编译时嵌在 `Assets\logo.png`。任务栏图标、托盘图标和 exe 图标都用它。exe 图标文件是 `src\DesktopContainers\Assets\app.ico`，由 `dotnet run -- --export-icon <路径>` 从这张图生成后再编译进去。换图时先覆盖 `EXELogo.png`，再复制到 `Assets\logo.png`，导出 ico，然后重新发布。
 
@@ -109,6 +109,7 @@ Copy-Item "$stage\DesktopContainers.exe" 'E:\VsCodeProject\桌面容器\app\Desk
 | `--startup` | 开机启动：只显示容器，不打开管理窗口和首次引导 |
 | `--smoke` | 冒烟测试，跑完退出 |
 | `--reflow-check` | 只跑排列自检然后退出 |
+| `--layouts` | 启动后打开布局页 |
 
 `UseWindowsForms` 会注入 `System.Drawing` 和 `System.Windows.Forms` 的全局 using，和 WPF 的 `Color`、`Button`、`Image` 撞名。项目文件里已经 `Using Remove` 掉这两个，并补了 `System.IO`（这个 SDK 的隐式 using 不含 IO）。新文件不要再全局引入 WinForms。需要 `Screen` 或 `NotifyIcon` 时写全名。
 
@@ -126,7 +127,11 @@ logs\app.log
 
 保存是临时文件 + `File.Replace`，再留 `.bak`。读失败先试 `.bak`，再按时间逐份尝试 `backups`。JSON 是 camelCase、缩进、`UnsafeRelaxedJsonEscaping`（中文可读）、字符串枚举，`version` 为 1。
 
-位置同时存 WPF DIP（`x` `y` `width` `height`）和物理像素（`pixelX` `pixelY` `pixelWidth` `pixelHeight` `hasPixelPosition`）以及 `monitorDevice`。还原用 `SetWindowPos` + `SWP_NOZORDER`。`screenLayouts` 按显示器边界（不含任务栏）最多记 8 套排列。切换时先冻结旧坐标，避免系统把窗口堆到剩下的屏幕上之后把好位置覆盖掉。新排列里能对上的就搬回去；对不上的按工作区重新排开，排不开再缩小列数。可见区域仍然小于 80×80 物理像素时，新建过程里的 `MonitorGuard` 会夹回最近的工作区。
+位置同时存 WPF DIP（`x` `y` `width` `height`）和物理像素（`pixelX` `pixelY` `pixelWidth` `pixelHeight` `hasPixelPosition`）以及 `monitorDevice`。还原用 `SetWindowPos` + `SWP_NOZORDER`。`screenLayouts` 自动按显示器边界、主屏和 DPI 最多记 8 套排列，`lastScreenKey` 记录模型所属屏幕；旧版不含 DPI 的 key 仍可读取。启动在创建窗口前冻结磁盘模型，连续两次 650ms 的屏幕采样稳定后才恢复。显示变化也在写模型前冻结；初始化、DPI 和临时挪窗期间不能持久化 HWND 坐标。同屏精确恢复不检查重叠、不自动散开，仅当窗口不足 80×80 可操作区域时移回屏幕。未保存过的屏幕使用 `LayoutProjection.Adapt`：每块原显示器上的容器作为整组，保留内部偏移和列数，按整组边界靠左、靠右或居中；放不下时统一等比缩放。禁止对各容器分别投影后再调用 `DisplayReflow.Fit`，这会打散用户保存的排列。多个原屏合到同一屏时，仅对整组边界用 `DisplayReflow` 调整。
+
+`ContainerModel.layoutScale` 与 `ContainerSpot.scale` 默认 1，保存整组适配产生的视觉缩放。`ContainerWindow` 对整个内容根节点做 `LayoutTransform`，`WindowWidth` / `WindowHeight` 同步乘比例，图标、间距和标题一起缩放，保持原列数。加载布局用 `RestoreLayoutSize` 同时恢复比例、宽高和列数；不能只缩窗口或改图标列数。布局卡片和实际恢复共用 `PreviewLayout` 计划，卡片显示当前屏幕适配结果；所选布局若与当前模型不同，状态为「位置已调整」。
+
+`layoutProfiles` 是用户手动命名的布局记忆，每套有 `id`、`name`、`savedUtc` 和 `screens`。每个屏幕快照包含独立的 `spots` 与 `monitors` 副本，自动布局和屏幕变化不得修改这些快照。更新只替换当前屏幕的那份，其他屏幕记忆保留，不按自动记忆的 8 份上限淘汰。`activeLayoutId` 用于当前会话换屏，`startupLayoutId` 用于开机；为空时使用上次退出的自动位置。第一套手动保存的布局默认作为开机布局，后续可在布局页修改。布局只记容器位置、尺寸与列数；按容器 ID 恢复，不重建已删除的容器、不回滚应用分组或主题。新增加的容器保留。删除记忆不删除容器。
 
 快捷方式规则：
 
@@ -152,7 +157,7 @@ logs\app.log
 - 拖动/缩放不暂停层级维护；鼠标捕获丢失也会结束操作并清理辅助线。
 - 拖容器的起点不能是图标、按钮或缩放区域。移动超过约 6 像素才开始拖。图标拖动阈值是 8 像素，而且只在编辑模式、未锁定时。拖动时靠近别的容器的边或中线会吸住，并画出虚线；左右或上下空隙如果和已有空隙一样，也会吸住，空隙中间有虚线。松手后虚线消失。对齐按玻璃卡片的外缘算，不按窗口阴影。
 - 拖放自定义格式是 `DesktopContainers.AppDrag`，内容是 `containerId|appId`。`DragSession` 把真正的 `MoveApp` 推迟到 `DoDragDrop` 返回之后。只有没被某个容器吃掉、没取消、并且光标不在任何容器里，才移回桌面。同一容器里重排时，先移除再按新索引插入。
-- 新容器默认按 3 列错开（约 468×344 DIP）。还没有像素位置时，若和已有容器大面积重叠，`MonitorGuard.NudgeApart` 再挪。平时拖好的位置会留在原来的屏幕坐标上。换分辨率、拔掉或接回显示器时，用那一套屏幕记下的位置；没记过的，就在当前屏幕里散开。启动时叠得很厉害的，会散开一次。
+- 新容器默认按 3 列错开（约 468×344 DIP）。还没有像素位置时，若和已有容器大面积重叠，`MonitorGuard.NudgeApart` 再挪。平时拖好的位置会留在原来的屏幕坐标上。换分辨率、DPI、拔掉或接回显示器时，用所选布局里那套屏幕记下的位置；没记过的就在当前屏幕适配，回到原屏幕后恢复原快照。启动不再因重叠自动散开。
 - 容器大小按里面的图标格子对齐。最宽是全部排成一行，最高是全部排成一列，中间只能停在完整的列数上。没有图标时保持 440×320。容器里不出现滚动条。图标尺寸：小 40、中 56、大 80，滑条 32–96。
 - 标题位置：`Top` `Bottom` `TopLeft` `Center` `Hidden`。
 - 布局变更走 `RequestSave`，400ms 防抖；删除、导入、退出、关机用 `Flush`。
@@ -192,6 +197,7 @@ logs\app.log
 | 图标抽取 | `Services\IconService.cs` |
 | 谁在桌面图标上面 | `Services\DesktopPlacement.cs` |
 | 显示器排列记忆、散开和还原 | `Services\DisplayMemory.cs`、`Services\DisplayReflow.cs`、`Services\MonitorGuard.cs` |
+| 命名布局、屏幕投影、布局页面 | `Services\LayoutProfiles.cs`、`Services\LayoutProjection.cs`、`Views\ManagerLayouts.cs` |
 | 容器外观、拖动和按格子缩放 | `Views\ContainerWindow.cs`、`Views\CornerGrip.cs` |
 | 产品名和标志 | `Views\BrandIcon.cs` |
 | 图标单击、双击、拖出 | `Views\AppIconView.cs`、`Views\DragSession.cs` |
@@ -220,5 +226,5 @@ logs\app.log
 - 没有资源管理器的桌面右键扩展。拖进容器、从容器拖出，是本程序窗口上的拖放。
 - 「显示桌面」只能尽量不让容器被最小化，不能保证所有系统版本都一样。
 - 透明容器是软件渲染，窗口多时比普通 WPF 窗口更吃 CPU，但空闲时应停在接近 0。
-- 冒烟证明：容器在桌面之上、应用显示和不切换前台的重排后容器仍在应用下方、提层请求不会把容器置顶、应用隐藏后回到桌面上方；记事本图标能抽出、快捷方式进了库且原 exe 还在、重读布局得到 2 个容器、完整备份能恢复已删的库内快捷方式。它不覆盖拖放、锁定、删除回桌面、开机启动注册表。
+- 冒烟证明：容器在桌面之上、应用显示和不切换前台的重排后容器仍在应用下方、提层请求不会把容器置顶、应用隐藏后回到桌面上方；记事本图标能抽出、快捷方式进了库且原 exe 还在、重读布局得到 2 个容器、完整备份能恢复已删的库内快捷方式。`LayoutChecks` 还验证命名保存、切换位置与尺寸、更新保留其他屏幕、名称校验、删除记忆保留容器、模拟重启、初始化冻结、故意叠放，以及分辨率、负坐标副屏和 DPI 投影；跨屏回归使用六容器靠右排列从 2560×1440 到 1707×1067，检查组内偏移、相同列数、等比缩小和返回大屏。真实窗口验证预览与应用结果一致、连续应用不累计缩放、返回原布局恢复比例。冒烟导入备份不会改真实开机启动注册表。它不覆盖真人拖放、锁定、删除回桌面、真正系统重启或物理拔插屏幕。
 - 层级诊断看冒烟报告里的 `above`、`layering` 与 `topmost`。`container.png` 是 `RenderTargetBitmap`，看控件本身；`container-screen.png` 是 `CopyFromScreen`，看它在桌面上的真实叠放。普通应用盖住容器是预期行为。

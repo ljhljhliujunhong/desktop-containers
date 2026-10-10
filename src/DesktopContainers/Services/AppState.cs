@@ -406,9 +406,11 @@ public sealed class AppState
             window.Close();
         AppHost.SuppressPersist = false;
         Document = incoming;
-        StartupService.Apply(Settings.LaunchAtStartup);
+        DisplayMemory.BindCurrent();
+        if (!AppHost.IsSmoke) StartupService.Apply(Settings.LaunchAtStartup);
         foreach (var container in Document.Containers)
             AppHost.OpenContainer(container, false);
+        DisplayMemory.RestoreStartup();
         AppHost.SetEditMode(Settings.EditMode);
         return null;
     }
@@ -463,6 +465,22 @@ public sealed class AppState
         document.CustomThemes ??= new ObservableCollection<ThemeDefinition>();
         document.Containers ??= new ObservableCollection<ContainerModel>();
         document.ScreenLayouts = NormalizeLayouts(document.ScreenLayouts);
+        document.LayoutProfiles ??= new List<LayoutProfile>();
+        var profileIds = new HashSet<string>(StringComparer.Ordinal);
+        document.LayoutProfiles.RemoveAll(profile => profile == null);
+        foreach (var profile in document.LayoutProfiles)
+        {
+            if (string.IsNullOrWhiteSpace(profile.Id) || !profileIds.Add(profile.Id))
+            {
+                profile.Id = Guid.NewGuid().ToString("N");
+                profileIds.Add(profile.Id);
+            }
+            profile.Name = string.IsNullOrWhiteSpace(profile.Name) ? "我的布局" : profile.Name.Trim();
+            if (profile.Name.Length > 32) profile.Name = profile.Name[..32];
+            profile.Screens = NormalizeLayouts(profile.Screens, int.MaxValue);
+        }
+        if (!profileIds.Contains(document.StartupLayoutId ?? "")) document.StartupLayoutId = null;
+        if (!profileIds.Contains(document.ActiveLayoutId ?? "")) document.ActiveLayoutId = null;
         if (document.Version <= 0) document.Version = 1;
         if (document.Settings.DefaultIconSize is < 32 or > 96)
             document.Settings.DefaultIconSize = 56;
@@ -500,8 +518,9 @@ public sealed class AppState
                 container.Name = "新容器";
             container.Apps ??= new ObservableCollection<AppEntry>();
             container.Appearance ??= ThemeCatalog.CreateAppearance(container.ThemeId, document.CustomThemes);
-            if (container.Width < 96) container.Width = 440;
-            if (container.Height < 96) container.Height = 320;
+            if (!double.IsFinite(container.LayoutScale) || container.LayoutScale is < 0.1 or > 1) container.LayoutScale = 1;
+            if (!double.IsFinite(container.Width) || container.Width < 10) container.Width = 440 * container.LayoutScale;
+            if (!double.IsFinite(container.Height) || container.Height < 10) container.Height = 320 * container.LayoutScale;
             if (container.IconSize is < 32 or > 96) container.IconSize = 56;
             foreach (var app in container.Apps)
             {
@@ -515,17 +534,19 @@ public sealed class AppState
         }
     }
 
-    static List<ScreenLayout> NormalizeLayouts(List<ScreenLayout>? layouts)
+    static List<ScreenLayout> NormalizeLayouts(List<ScreenLayout>? layouts, int limit = 8)
     {
         var kept = new List<ScreenLayout>();
         if (layouts == null) return kept;
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = layouts.Count - 1; i >= 0 && kept.Count < 8; i--)
+        for (var i = layouts.Count - 1; i >= 0 && kept.Count < limit; i--)
         {
             var layout = layouts[i];
             if (layout == null || string.IsNullOrWhiteSpace(layout.Key) || !seen.Add(layout.Key))
                 continue;
             layout.Spots = NormalizeSpots(layout.Spots);
+            layout.Monitors ??= new List<LayoutMonitor>();
+            layout.Monitors.RemoveAll(monitor => monitor == null || monitor.Width <= 0 || monitor.Height <= 0);
             kept.Add(layout);
         }
         kept.Reverse();
@@ -542,6 +563,11 @@ public sealed class AppState
             var spot = spots[i];
             if (spot == null || string.IsNullOrWhiteSpace(spot.Id) || !seen.Add(spot.Id))
                 continue;
+            if (!double.IsFinite(spot.Width) || !double.IsFinite(spot.Height)
+                || spot.Width < 10 || spot.Height < 10 || spot.PixelWidth < 0 || spot.PixelHeight < 0
+                || Math.Abs((long)spot.PixelX) > 1000000 || Math.Abs((long)spot.PixelY) > 1000000)
+                continue;
+            if (!double.IsFinite(spot.Scale) || spot.Scale is < 0.1 or > 1) spot.Scale = 1;
             kept.Add(spot);
         }
         kept.Reverse();

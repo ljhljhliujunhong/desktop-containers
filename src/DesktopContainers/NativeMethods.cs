@@ -112,6 +112,12 @@ public static class NativeMethods
     public static extern uint GetDpiForWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromPoint(POINT point, uint flags);
+
+    [DllImport("shcore.dll")]
+    public static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll")]
     public static extern bool GetCursorPos(out POINT lpPoint);
 
     [DllImport("user32.dll")]

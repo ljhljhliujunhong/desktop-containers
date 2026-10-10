@@ -123,6 +123,7 @@ public sealed class ContainerModel : ObservableObject
     public double Y { get; set; } = 72;
     public double Width { get; set; } = 440;
     public double Height { get; set; } = 320;
+    public double LayoutScale { get; set; } = 1;
     public int PixelX { get; set; }
     public int PixelY { get; set; }
     public int PixelWidth { get; set; }
@@ -167,12 +168,36 @@ public sealed class LayoutDocument
     public ObservableCollection<ThemeDefinition> CustomThemes { get; set; } = new();
     public ObservableCollection<ContainerModel> Containers { get; set; } = new();
     public List<ScreenLayout> ScreenLayouts { get; set; } = new();
+    public string LastScreenKey { get; set; } = "";
+    public List<LayoutProfile> LayoutProfiles { get; set; } = new();
+    public string? ActiveLayoutId { get; set; }
+    public string? StartupLayoutId { get; set; }
+}
+
+public sealed class LayoutProfile
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public DateTime SavedUtc { get; set; } = DateTime.UtcNow;
+    public List<ScreenLayout> Screens { get; set; } = new();
 }
 
 public sealed class ScreenLayout
 {
     public string Key { get; set; } = "";
     public List<ContainerSpot> Spots { get; set; } = new();
+    public List<LayoutMonitor> Monitors { get; set; } = new();
+}
+
+public sealed class LayoutMonitor
+{
+    public string Device { get; set; } = "";
+    public uint Dpi { get; set; } = 96;
+    public bool Primary { get; set; }
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
 }
 
 public sealed class ContainerSpot
@@ -186,6 +211,7 @@ public sealed class ContainerSpot
     public double Y { get; set; }
     public double Width { get; set; }
     public double Height { get; set; }
+    public double Scale { get; set; } = 1;
 }
 
 public static class Paint

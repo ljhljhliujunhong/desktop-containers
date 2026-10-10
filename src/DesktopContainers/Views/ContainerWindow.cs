@@ -184,6 +184,7 @@ public sealed class ContainerWindow : Window
         _card.MouseLeave += (_, _) => { _hover = false; ApplyChrome(); };
 
         var root = new Grid();
+        root.LayoutTransform = new ScaleTransform(model.LayoutScale, model.LayoutScale);
         root.Children.Add(_shadow1);
         root.Children.Add(_shadow2);
         root.Children.Add(_card);
@@ -724,7 +725,8 @@ public sealed class ContainerWindow : Window
             if (!IsLoaded || double.IsNaN(Left) || double.IsNaN(Top) || Left < -10000 || Top < -10000) return;
             if (Math.Abs(beforeW - Width) < 0.5 && Math.Abs(beforeH - Height) < 0.5) return;
             PersistBounds();
-            AppHost.State.Flush();
+            if (!AppHost.SuppressPersist && DisplayMemory.CanPersist)
+                AppHost.State.Flush();
         }
         finally
         {
@@ -778,8 +780,8 @@ public sealed class ContainerWindow : Window
     {
         if (Model.Apps.Count == 0 || columns < 1 || _cellW < 1 || _cellH < 1)
         {
-            Width = 440;
-            Height = 320;
+            Width = 440 * Model.LayoutScale;
+            Height = 320 * Model.LayoutScale;
             _iconPanel.Width = double.NaN;
             return;
         }
@@ -793,7 +795,7 @@ public sealed class ContainerWindow : Window
     const double ContentSlack = 2;
 
     double WindowWidth(int columns) =>
-        Math.Max(FrameWidth() + columns * _cellW + ContentSlack, FrameWidth() + NaturalTitleWidth());
+        Math.Max(FrameWidth() + columns * _cellW + ContentSlack, FrameWidth() + NaturalTitleWidth()) * Model.LayoutScale;
 
     double NaturalTitleWidth()
     {
@@ -816,7 +818,7 @@ public sealed class ContainerWindow : Window
         _title.MaxWidth = Math.Max(48, inner);
     }
 
-    double WindowHeight(int columns, int rows) => FrameHeight(columns * _cellW) + rows * _cellH + ContentSlack;
+    double WindowHeight(int columns, int rows) => (FrameHeight(columns * _cellW) + rows * _cellH + ContentSlack) * Model.LayoutScale;
 
     double FrameWidth() =>
         _card.Margin.Left + _card.Margin.Right
@@ -848,10 +850,20 @@ public sealed class ContainerWindow : Window
 
     public void RememberDip(double width, double height)
     {
-        if (width < 96 || height < 96) return;
+        if (!double.IsFinite(width) || !double.IsFinite(height) || width < 10 || height < 10) return;
         if (Math.Abs(Width - width) < 0.5 && Math.Abs(Height - height) < 0.5) return;
         Width = width;
         Height = height;
+        SnapToContents();
+    }
+
+    public void RestoreLayoutSize(double width, double height, double scale)
+    {
+        Model.LayoutScale = double.IsFinite(scale) ? Math.Clamp(scale, 0.1, 1) : 1;
+        ((FrameworkElement)Content).LayoutTransform = new ScaleTransform(Model.LayoutScale, Model.LayoutScale);
+        Width = width;
+        Height = height;
+        SnapToContents();
     }
 
     public bool FitInside(int maxPixelW, int maxPixelH)
@@ -905,7 +917,7 @@ public sealed class ContainerWindow : Window
 
     void PersistBounds()
     {
-        if (AppHost.SuppressPersist || Width < 10 || Height < 10) return;
+        if (AppHost.SuppressPersist || !DisplayMemory.CheckBeforePersist() || Width < 10 || Height < 10) return;
         var hwnd = new WindowInteropHelper(this).Handle;
         if (hwnd != IntPtr.Zero && NativeMethods.GetWindowRect(hwnd, out var rect))
         {
@@ -956,6 +968,11 @@ public sealed class ContainerWindow : Window
         const int SC_MINIMIZE = 0xF020;
         const int WM_WINDOWPOSCHANGING = 0x0046;
         const int WM_DPICHANGED = 0x02E0;
+        const int WM_DISPLAYCHANGE = 0x007E;
+        if (msg == WM_DPICHANGED)
+            DisplayMemory.OnDpiChanged();
+        if (msg == WM_DISPLAYCHANGE)
+            DisplayMemory.OnDisplayChanged();
         if (msg == WM_DPICHANGED)
             Dispatcher.BeginInvoke(ScheduleRebuild, DispatcherPriority.Loaded);
         if (msg == WM_MOUSEACTIVATE)

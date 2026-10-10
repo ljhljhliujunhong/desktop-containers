@@ -92,6 +92,11 @@ public partial class ManagerWindow : Window
 
     public void SyncEditSwitch() => _editSwitch?.SetSilent(AppHost.State.Settings.EditMode);
 
+    public void RefreshLayoutPage()
+    {
+        if (_page == "layouts" && OwnedWindows.Count == 0) Navigate("layouts");
+    }
+
     public void CreateContainer()
     {
         using (ModalDim.Cover(this))
@@ -111,6 +116,7 @@ public partial class ManagerWindow : Window
         {
             "containers" => BuildContainers(),
             "themes" => BuildThemes(),
+            "layouts" => BuildLayouts(),
             "settings" => BuildSettings(),
             _ => BuildHome()
         };
@@ -170,6 +176,7 @@ public partial class ManagerWindow : Window
         var nav = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
         nav.Children.Add(Nav("home", "首页"));
         nav.Children.Add(Nav("containers", "容器"));
+        nav.Children.Add(Nav("layouts", "布局"));
         nav.Children.Add(Nav("themes", "主题"));
         nav.Children.Add(Nav("settings", "设置"));
 

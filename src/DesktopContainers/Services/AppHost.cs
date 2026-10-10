@@ -106,7 +106,7 @@ public static class AppHost
         foreach (var container in State.Document.Containers.ToList())
             OpenContainer(container, false);
 
-        Application.Current.Dispatcher.BeginInvoke(DisplayMemory.RepairIfPiled, DispatcherPriority.ApplicationIdle);
+        DisplayMemory.RestoreStartup();
 
         Tray = new TrayController();
         BrandIcon.SaveCanonical();
@@ -122,7 +122,7 @@ public static class AppHost
             State.Flush();
         }
 
-        ShowManager();
+        ShowManager(args.Contains("--layouts") ? "layouts" : null);
     }
 
     public static ContainerWindow OpenContainer(ContainerModel model, bool placeOnCursor)
@@ -181,7 +181,6 @@ public static class AppHost
         if (IsExiting) return;
         IsExiting = true;
         DesktopPlacement.Stop();
-        DisplayMemory.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettings;
         SystemEvents.SessionEnding -= OnSessionEnding;
         try { State?.Flush(); } catch (Exception ex) { Log.Error("flush", ex); }
@@ -189,6 +188,7 @@ public static class AppHost
         Tray = null;
         foreach (var window in _windows.ToList())
             window.Close();
+        DisplayMemory.Stop();
         Manager?.Close();
         Application.Current?.Shutdown();
     }
@@ -200,6 +200,7 @@ public static class AppHost
         try
         {
             DisplayReflow.Check();
+            LayoutChecks.CheckGeometry();
             Environment.Exit(0);
         }
         catch (Exception ex)

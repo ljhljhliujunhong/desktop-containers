@@ -17,6 +17,7 @@ public static class SmokeTest
         try
         {
             DisplayReflow.Check();
+            LayoutChecks.CheckGeometry();
             if (!AppHost.DataRoot.Contains("AgentCache", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("smoke 拒绝使用这个数据目录");
 
@@ -76,6 +77,9 @@ public static class SmokeTest
             manager.Navigate("containers");
             manager.UpdateLayout();
             Shot(manager, Path.Combine(AppHost.DataRoot, "manager-containers.png"));
+            manager.Navigate("layouts");
+            manager.UpdateLayout();
+            Shot(manager, Path.Combine(AppHost.DataRoot, "manager-layouts-empty.png"));
             manager.Navigate("settings");
             manager.UpdateLayout();
             Shot(manager, Path.Combine(AppHost.DataRoot, "manager-settings.png"));
@@ -94,6 +98,12 @@ public static class SmokeTest
                 {
                     CopyScreen(window, Path.Combine(AppHost.DataRoot, "container-screen.png"));
                     await CheckLayering(window);
+                    await LayoutChecks.CheckWindows();
+                    window = AppHost.FindWindow(container.Id)!;
+                    manager.Navigate("layouts");
+                    manager.Show();
+                    Shot(manager, Path.Combine(AppHost.DataRoot, "manager-layouts.png"));
+                    manager.Hide();
                     var hwnd = new WindowInteropHelper(window).Handle;
                     var above = DesktopPlacement.IsAboveDesktop(hwnd);
                     var entry = container.Apps.FirstOrDefault();
@@ -118,6 +128,7 @@ public static class SmokeTest
                     [
                         "above=" + above,
                         "layering=ok",
+                        "layouts=ok",
                         "icon=" + iconOk,
                         "stored=" + stored,
                         "backupRestore=" + backupOk,

@@ -13,6 +13,7 @@ public sealed class TrayController : IDisposable
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("打开", null, (_, _) => AppHost.ShowManager());
         menu.Items.Add(_edit);
+        menu.Items.Add("布局", null, (_, _) => AppHost.ShowManager("layouts"));
         menu.Items.Add("新建容器", null, (_, _) =>
         {
             AppHost.ShowManager();

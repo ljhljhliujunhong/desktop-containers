@@ -5,136 +5,147 @@ using System.Windows.Threading;
 
 namespace DesktopContainers;
 
-/// <summary>
-/// 按显示器排列记住容器位置。拔掉外接屏时先冻结旧坐标，再在剩下的屏幕上散开。
-/// 冻结之后、摆定之前，窗口被系统挪过的位置不能写回旧的那一份。
-/// </summary>
+/// <summary>系统调整窗口期间冻结模型；恢复完成之前，临时坐标不能写回记忆。</summary>
 public static class DisplayMemory
 {
-    const int SettleMs = 650;
     const int MaxLayouts = 8;
-    const double PileRatio = 0.5;
-    const int KnownSize = 80;
-    const int SizeSlack = 8;
-
     static string _activeKey = "";
-    static List<ContainerSpot>? _frozen;
-    static bool _frozenCaptured;
-    static bool _settling;
+    static ScreenLayout? _frozen;
+    static bool _restoring;
+    static bool _startup;
+    static string _observedKey = "";
     static DispatcherTimer? _timer;
 
-    public static void BindCurrent() => _activeKey = TopologyKey();
+    public static bool CanPersist => !_restoring && _timer is not { IsEnabled: true };
+    public static bool IsBusy => !CanPersist || AppHost.Windows.Any(window => window.IsGesture);
+    public static string CurrentKey => TopologyKey();
+
+    public static void BindCurrent()
+    {
+        Stop();
+        var document = AppHost.State.Document;
+        _activeKey = string.IsNullOrEmpty(document.LastScreenKey) ? TopologyKey() : document.LastScreenKey;
+        _frozen = SnapshotModels(_activeKey);
+        _restoring = true;
+        _startup = true;
+    }
+
+    public static void RestoreStartup() => ScheduleSettle();
+
+    public static void OnDpiChanged()
+    {
+        // 用户拖到另一块 DPI 不同的屏幕时，整套屏幕拓扑并没有变化。
+        // 这种移动继续由拖动结束时保存，不能触发整桌恢复。
+        if (_activeKey != TopologyKey()) OnDisplayChanged();
+    }
 
     public static void Stop()
     {
         _timer?.Stop();
         _frozen = null;
-        _frozenCaptured = false;
-        _settling = false;
+        _restoring = false;
+        _startup = false;
+        _observedKey = "";
+        _activeKey = "";
     }
 
     public static void OnDisplayChanged()
     {
         var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher == null) return;
+        if (dispatcher == null || AppHost.IsExiting || AppHost.IsSmoke) return;
         if (!dispatcher.CheckAccess())
         {
-            try
-            {
-                dispatcher.Invoke(OnDisplayChanged);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("reflow", ex);
-            }
+            dispatcher.BeginInvoke(OnDisplayChanged);
             return;
         }
-        if (AppHost.IsExiting || AppHost.IsSmoke) return;
-        FreezeOnce();
+        if (!_restoring)
+        {
+            // 只读模型；显示通知到达时 HWND 可能已经被 Windows 移动。
+            _frozen = SnapshotModels(_activeKey);
+            _restoring = true;
+            if (_activeKey.Length > 0) SaveSnapshot(_frozen);
+            AppHost.State.RequestSave();
+        }
+        _observedKey = "";
         ScheduleSettle();
     }
 
     public static void Note(ContainerModel model)
     {
-        if (_frozenCaptured || _settling || AppHost.SuppressPersist) return;
-        if (_activeKey.Length == 0 || AppHost.State == null || string.IsNullOrWhiteSpace(model.Id)) return;
-        var layouts = AppHost.State.Document.ScreenLayouts ??= new List<ScreenLayout>();
-        var layout = layouts.FirstOrDefault(item => item.Key == _activeKey);
+        if (!CanPersist || AppHost.SuppressPersist || AppHost.State == null) return;
+        var key = TopologyKey();
+        if (_activeKey.Length == 0) _activeKey = key;
+        if (key != _activeKey)
+        {
+            OnDisplayChanged();
+            return;
+        }
+        var layouts = AppHost.State.Document.ScreenLayouts;
+        var layout = layouts.LastOrDefault(item => item.Key == key);
         if (layout == null)
         {
-            layout = new ScreenLayout { Key = _activeKey };
+            layout = new ScreenLayout { Key = key, Monitors = Monitors() };
             layouts.Add(layout);
         }
-        else
-        {
-            layouts.Remove(layout);
-            layouts.Add(layout);
-        }
-        layout.Spots ??= new List<ContainerSpot>();
-        var spot = layout.Spots.FirstOrDefault(item => item.Id == model.Id);
-        if (spot == null)
-        {
-            spot = new ContainerSpot();
-            layout.Spots.Add(spot);
-        }
-        Copy(spot, model);
-        while (layouts.Count > MaxLayouts)
-            layouts.RemoveAt(0);
+        layout.Spots.RemoveAll(spot => spot.Id == model.Id);
+        layout.Spots.Add(Spot(model));
+        layouts.Remove(layout);
+        layouts.Add(layout);
+        while (layouts.Count > MaxLayouts) layouts.RemoveAt(0);
+        AppHost.State.Document.LastScreenKey = key;
     }
 
-    public static void RepairIfPiled()
+    // 在 PersistBounds 写模型之前检测拓扑，防止抢在显示通知之前污染旧坐标。
+    public static bool CheckBeforePersist()
     {
-        var started = false;
+        if (!CanPersist) return false;
+        if (!AppHost.IsSmoke && _activeKey.Length > 0 && _activeKey != TopologyKey())
+        {
+            OnDisplayChanged();
+            return false;
+        }
+        return true;
+    }
+
+    public static ScreenLayout CaptureCurrent()
+    {
+        if (IsBusy) throw new InvalidOperationException("屏幕正在调整，请稍后再试。");
+        foreach (var window in AppHost.Windows) window.CommitBounds();
+        return SnapshotModels(TopologyKey());
+    }
+
+    public static void ApplyProfile(LayoutProfile profile)
+    {
+        if (IsBusy) throw new InvalidOperationException("屏幕正在调整，请稍后再试。");
+        var source = Choose(profile.Screens, TopologyKey());
+        if (source == null) throw new InvalidOperationException("这个布局没有可用的位置。");
+        var oldActive = AppHost.State.Document.ActiveLayoutId;
+        var before = CaptureCurrent();
+        _restoring = true;
         try
         {
-            if (AppHost.IsSmoke || AppHost.IsExiting || AppHost.State == null) return;
-            if (_frozenCaptured || _settling || _timer is { IsEnabled: true }) return;
-            var windows = AppHost.Windows.ToList();
-            if (windows.Count < 1 || windows.Any(window => window.IsGesture)) return;
-            var live = windows.Select(ReadLive).ToArray();
-            if (!NeedsRepair(live)) return;
-
-            started = true;
-            _settling = true;
+            Apply(source);
             _activeKey = TopologyKey();
-            var works = WorkAreas();
-            if (works.Length == 0) return;
-            var fromSnapshot = TryUsable(_activeKey, windows, out var saved);
-            var anchors = fromSnapshot
-                ? AnchorsFor(windows, saved, true)
-                : live;
-            var fitted = DisplayReflow.Fit(anchors, works);
-            ApplyFitted(windows, anchors, fitted, fromSnapshot ? saved : null);
-            SaveSnapshot(_activeKey, CaptureModels());
+            AppHost.State.Document.ActiveLayoutId = profile.Id;
+            SaveSnapshot(SnapshotModels(_activeKey));
+            AppHost.State.Document.LastScreenKey = _activeKey;
             AppHost.State.Flush();
-            Log.Info("reflow repair n=" + windows.Count);
         }
-        catch (Exception ex)
+        catch
         {
-            Log.Error("reflow", ex);
+            AppHost.State.Document.ActiveLayoutId = oldActive;
+            Apply(before);
+            SaveSnapshot(before);
+            throw;
         }
-        finally
-        {
-            if (started) _settling = false;
-        }
-    }
-
-    static void FreezeOnce()
-    {
-        if (_frozenCaptured || AppHost.State == null || _activeKey.Length == 0) return;
-        _frozen = CaptureModels();
-        _frozenCaptured = true;
-        SaveSnapshot(_activeKey, _frozen);
-        AppHost.State.RequestSave();
-        Log.Info("reflow freeze key=" + _activeKey + " n=" + _frozen.Count);
+        finally { _restoring = false; }
     }
 
     static void ScheduleSettle()
     {
-        if (Application.Current?.Dispatcher == null) return;
         if (_timer == null)
         {
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SettleMs) };
+            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) };
             _timer.Tick += OnTick;
         }
         _timer.Stop();
@@ -145,360 +156,164 @@ public static class DisplayMemory
     {
         _timer?.Stop();
         if (AppHost.IsExiting) return;
-        if (AppHost.Windows.Any(window => window.IsGesture))
+        var key = TopologyKey();
+        if (_observedKey != key || AppHost.Windows.Any(window => window.IsGesture))
         {
+            _observedKey = key;
             ScheduleSettle();
             return;
         }
-        Settle();
-    }
-
-    static void Settle()
-    {
         try
         {
-            SettleCore();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("reflow", ex);
-        }
-    }
-
-    static void SettleCore()
-    {
-        var finished = true;
-        try
-        {
-            if (AppHost.IsExiting || AppHost.State == null) return;
-            var windows = AppHost.Windows.ToList();
-            if (windows.Count == 0)
-            {
-                _activeKey = TopologyKey();
-                return;
-            }
-            if (windows.Any(window => window.IsGesture))
-            {
-                finished = false;
-                ScheduleSettle();
-                return;
-            }
-
-            var newKey = TopologyKey();
-            var live = windows.Select(ReadLive).ToArray();
-            if (newKey == _activeKey && !NeedsRepair(live))
-                return;
-
-            var works = WorkAreas();
-            if (works.Length == 0)
-            {
-                _activeKey = newKey;
-                return;
-            }
-
-            _settling = true;
-            _activeKey = newKey;
-            var fromSnapshot = TryUsable(newKey, windows, out var saved);
-            var anchors = AnchorsFor(windows, fromSnapshot ? saved : null, fromSnapshot);
-            var fitted = DisplayReflow.Fit(anchors, works);
-            ApplyFitted(windows, anchors, fitted, fromSnapshot ? saved : null);
-            SaveSnapshot(newKey, CaptureModels());
+            _restoring = true;
+            var document = AppHost.State.Document;
+            var profileId = _startup ? document.StartupLayoutId : document.ActiveLayoutId;
+            var profile = document.LayoutProfiles.FirstOrDefault(item => item.Id == profileId);
+            var source = !_startup && key == _activeKey ? _frozen
+                : profile == null ? null : Choose(profile.Screens, key);
+            source ??= FindForScreen(document.ScreenLayouts, key);
+            source ??= _frozen;
+            if (source != null) Apply(source);
+            _activeKey = key;
+            document.LastScreenKey = key;
+            if (_startup) document.ActiveLayoutId = profile?.Id;
+            // 已记住的精确坐标不因工作区暂时变小而被覆盖。
+            if (source?.Key != key || !document.ScreenLayouts.Any(layout => layout.Key == key))
+                SaveSnapshot(SnapshotModels(key));
             AppHost.State.Flush();
-            Log.Info("reflow key=" + newKey + " snapshot=" + fromSnapshot + " n=" + windows.Count);
+            Log.Info("layout restore key=" + key + " profile=" + (profile?.Name ?? "auto"));
+            AppHost.Manager?.RefreshLayoutPage();
         }
+        catch (Exception ex) { Log.Error("layout restore", ex); }
         finally
         {
-            if (finished)
-            {
-                _settling = false;
-                _frozen = null;
-                _frozenCaptured = false;
-            }
+            _restoring = false;
+            _startup = false;
+            _frozen = null;
         }
     }
 
-    static void ApplyFitted(
-        IReadOnlyList<ContainerWindow> windows,
-        PixelRect[] anchors,
-        PixelRect[] fitted,
-        IReadOnlyList<ContainerSpot>? spots)
+    static void Apply(ScreenLayout source)
     {
-        var needSecond = false;
-        for (var i = 0; i < windows.Count; i++)
-        {
-            var window = windows[i];
-            var live = ReadLive(window);
-            var spot = FindSpot(spots, window.Model.Id);
-            if (spot != null && Known(spot) && Near(fitted[i], spot))
-            {
-                window.RememberDip(spot.Width, spot.Height);
-                continue;
-            }
-            if (!Known(spot) && fitted[i].W + SizeSlack >= live.W && fitted[i].H + SizeSlack >= live.H)
-            {
-                if (spot != null)
-                    window.RememberDip(spot.Width, spot.Height);
-                continue;
-            }
-            if (fitted[i].W + SizeSlack < live.W || fitted[i].H + SizeSlack < live.H)
-            {
-                window.FitInside(fitted[i].W, fitted[i].H);
-                needSecond = true;
-            }
-        }
-
-        foreach (var window in windows)
-            window.UpdateLayout();
-
-        var positions = fitted;
-        if (needSecond)
-        {
-            var second = new PixelRect[windows.Count];
-            for (var i = 0; i < windows.Count; i++)
-            {
-                var live = ReadLive(windows[i]);
-                second[i] = new PixelRect(anchors[i].X, anchors[i].Y, Math.Max(KnownSize, live.W), Math.Max(KnownSize, live.H));
-            }
-            positions = DisplayReflow.Fit(second, WorkAreas(), false);
-        }
-
+        var windows = AppHost.Windows.ToList();
+        var works = WorkAreas();
+        if (works.Length == 0) throw new InvalidOperationException("没有可用的屏幕。");
+        var plan = PreviewLayout(source);
+        var spots = plan.Spots.ToDictionary(spot => spot.Id);
+        var previousSuppress = AppHost.SuppressPersist;
         AppHost.SuppressPersist = true;
         try
         {
-            for (var i = 0; i < windows.Count; i++)
-                windows[i].ApplyPixelBounds(positions[i].X, positions[i].Y, positions[i].W, positions[i].H, false);
+            foreach (var window in windows)
+            {
+                if (spots.TryGetValue(window.Model.Id, out var spot))
+                {
+                    // 位置、列数和整体缩放都来自同一份计划，预览也使用这份计划。
+                    window.ApplyPixelBounds(spot.PixelX, spot.PixelY, spot.PixelWidth, spot.PixelHeight, false);
+                    window.RestoreLayoutSize(spot.Width, spot.Height, spot.Scale);
+                    window.UpdateLayout();
+                    window.ApplyPixelBounds(spot.PixelX, spot.PixelY, spot.PixelWidth, spot.PixelHeight, false);
+                }
+                else
+                {
+                    var rect = LayoutProjection.EnsureVisible(ReadLive(window), works);
+                    window.ApplyPixelBounds(rect.X, rect.Y, rect.W, rect.H, false);
+                }
+                UpdateModel(window);
+            }
             DesktopPlacement.PinAll();
         }
-        finally
-        {
-            AppHost.SuppressPersist = false;
-        }
-        foreach (var window in windows)
-            window.CommitBounds();
+        finally { AppHost.SuppressPersist = previousSuppress; }
     }
 
-    static PixelRect[] AnchorsFor(IReadOnlyList<ContainerWindow> windows, IReadOnlyList<ContainerSpot>? spots, bool fromSnapshot)
+    public static ScreenLayout PreviewLayout(ScreenLayout source)
     {
-        var result = new PixelRect[windows.Count];
-        for (var i = 0; i < windows.Count; i++)
-        {
-            var window = windows[i];
-            var spot = fromSnapshot ? FindSpot(spots, window.Model.Id) : null;
-            result[i] = spot != null ? RectFromSpot(spot, window) : RectFromFrozenOrLive(window);
-        }
-        return result;
+        var key = TopologyKey();
+        return LayoutProjection.Adapt(source, key, Monitors(), WorkAreas(), source.Key == key || IsLegacyMatch(source.Key, key));
     }
 
-    static PixelRect RectFromSpot(ContainerSpot spot, ContainerWindow window)
+    static void UpdateModel(ContainerWindow window)
     {
-        var live = ReadLive(window);
-        int width;
-        int height;
-        if (Known(spot))
-        {
-            width = spot.PixelWidth;
-            height = spot.PixelHeight;
-        }
-        else if (live.W >= KnownSize && live.H >= KnownSize)
-        {
-            width = live.W;
-            height = live.H;
-        }
-        else
-        {
-            width = Math.Max(KnownSize, Math.Max(live.W, spot.PixelWidth));
-            height = Math.Max(KnownSize, Math.Max(live.H, spot.PixelHeight));
-        }
-        return new PixelRect(spot.PixelX, spot.PixelY, width, height);
+        var rect = ReadLive(window);
+        var model = window.Model;
+        model.PixelX = rect.X;
+        model.PixelY = rect.Y;
+        model.PixelWidth = rect.W;
+        model.PixelHeight = rect.H;
+        model.HasPixelPosition = true;
+        model.X = window.Left;
+        model.Y = window.Top;
+        model.Width = window.Width;
+        model.Height = window.Height;
+        model.MonitorDevice = MonitorGuard.DeviceName(window);
     }
 
-    static PixelRect RectFromFrozenOrLive(ContainerWindow window)
+    static ScreenLayout SnapshotModels(string key) => new()
     {
-        var live = ReadLive(window);
-        var spot = FindSpot(_frozen, window.Model.Id);
-        if (spot == null)
-        {
-            if (live.W >= KnownSize && live.H >= KnownSize) return live;
-            var model = window.Model;
-            var width = model.PixelWidth >= KnownSize ? model.PixelWidth : 440;
-            var height = model.PixelHeight >= KnownSize ? model.PixelHeight : 320;
-            var x = model.HasPixelPosition ? model.PixelX : live.X;
-            var y = model.HasPixelPosition ? model.PixelY : live.Y;
-            return new PixelRect(x, y, width, height);
-        }
-
-        int w;
-        int h;
-        if (live.W >= KnownSize && live.H >= KnownSize)
-        {
-            w = live.W;
-            h = live.H;
-        }
-        else if (Known(spot))
-        {
-            w = spot.PixelWidth;
-            h = spot.PixelHeight;
-        }
-        else
-        {
-            w = KnownSize;
-            h = KnownSize;
-        }
-        return new PixelRect(spot.PixelX, spot.PixelY, w, h);
-    }
-
-    static bool TryUsable(string key, IReadOnlyList<ContainerWindow> windows, out List<ContainerSpot> spots)
-    {
-        spots = Clone(Find(key));
-        if (spots.Count == 0) return false;
-        var matched = new List<PixelRect>();
-        foreach (var window in windows)
-        {
-            var spot = FindSpot(spots, window.Model.Id);
-            if (spot == null) continue;
-            matched.Add(RectFromSpot(spot, window));
-        }
-        if (matched.Count == 0 || DisplayReflow.HasHeavyOverlap(matched, PileRatio)) return false;
-        var works = WorkAreas();
-        var inside = matched.Count(rect => DisplayReflow.MostlyInside(rect, works));
-        return inside / (double)matched.Count >= PileRatio;
-    }
-
-    static bool NeedsRepair(IReadOnlyList<PixelRect> live)
-    {
-        if (live.Count == 0) return false;
-        var works = WorkAreas();
-        foreach (var rect in live)
-        {
-            if (!DisplayReflow.MostlyInside(rect, works)) return true;
-        }
-        return DisplayReflow.HasHeavyOverlap(live, PileRatio);
-    }
-
-    static List<ContainerSpot> CaptureModels()
-    {
-        var spots = new List<ContainerSpot>();
-        foreach (var window in AppHost.Windows)
-        {
-            var spot = new ContainerSpot();
-            Copy(spot, window.Model);
-            spots.Add(spot);
-        }
-        return spots;
-    }
-
-    static void SaveSnapshot(string key, List<ContainerSpot> spots)
-    {
-        if (key.Length == 0 || AppHost.State == null) return;
-        var layouts = AppHost.State.Document.ScreenLayouts ??= new List<ScreenLayout>();
-        layouts.RemoveAll(item => item.Key == key);
-        layouts.Add(new ScreenLayout { Key = key, Spots = Clone(spots) });
-        while (layouts.Count > MaxLayouts)
-            layouts.RemoveAt(0);
-    }
-
-    static List<ContainerSpot> Find(string key)
-    {
-        var layouts = AppHost.State?.Document.ScreenLayouts;
-        if (layouts == null || key.Length == 0) return [];
-        for (var i = layouts.Count - 1; i >= 0; i--)
-        {
-            var layout = layouts[i];
-            if (layout?.Key == key && layout.Spots != null)
-                return layout.Spots;
-        }
-        return [];
-    }
-
-    static ContainerSpot? FindSpot(IReadOnlyList<ContainerSpot>? spots, string id)
-    {
-        if (spots == null || string.IsNullOrWhiteSpace(id)) return null;
-        for (var i = 0; i < spots.Count; i++)
-        {
-            if (spots[i].Id == id) return spots[i];
-        }
-        return null;
-    }
-
-    static void Copy(ContainerSpot spot, ContainerModel model)
-    {
-        spot.Id = model.Id;
-        spot.PixelX = model.PixelX;
-        spot.PixelY = model.PixelY;
-        spot.PixelWidth = model.PixelWidth;
-        spot.PixelHeight = model.PixelHeight;
-        spot.X = model.X;
-        spot.Y = model.Y;
-        spot.Width = model.Width;
-        spot.Height = model.Height;
-    }
-
-    static List<ContainerSpot> Clone(List<ContainerSpot> spots) => spots.Select(CloneSpot).ToList();
-
-    static ContainerSpot CloneSpot(ContainerSpot spot) => new()
-    {
-        Id = spot.Id,
-        PixelX = spot.PixelX,
-        PixelY = spot.PixelY,
-        PixelWidth = spot.PixelWidth,
-        PixelHeight = spot.PixelHeight,
-        X = spot.X,
-        Y = spot.Y,
-        Width = spot.Width,
-        Height = spot.Height
+        Key = key,
+        Spots = AppHost.State.Document.Containers.Where(model => model.HasPixelPosition).Select(Spot).ToList(),
+        Monitors = AppHost.State.Document.ScreenLayouts.LastOrDefault(layout => layout.Key == key)?.Monitors is { Count: > 0 } monitors
+            ? LayoutProjection.CloneMonitors(monitors) : Monitors()
     };
+
+    static void SaveSnapshot(ScreenLayout layout)
+    {
+        var layouts = AppHost.State.Document.ScreenLayouts;
+        layouts.RemoveAll(item => item.Key == layout.Key);
+        layouts.Add(LayoutProjection.Clone(layout));
+        while (layouts.Count > MaxLayouts) layouts.RemoveAt(0);
+    }
+
+    public static ScreenLayout? Choose(List<ScreenLayout> layouts, string key) =>
+        FindForScreen(layouts, key) ?? layouts.LastOrDefault();
+
+    static ScreenLayout? FindForScreen(List<ScreenLayout> layouts, string key) =>
+        layouts.LastOrDefault(layout => layout.Key == key)
+        ?? layouts.LastOrDefault(layout => IsLegacyMatch(layout.Key, key));
+
+    static bool IsLegacyMatch(string oldKey, string key) => !oldKey.Contains('@')
+        && oldKey == string.Join("|", key.Split('|').Select(part => part.Split('@')[0]));
+
+    static ContainerSpot Spot(ContainerModel model) => new()
+    {
+        Id = model.Id, PixelX = model.PixelX, PixelY = model.PixelY,
+        PixelWidth = model.PixelWidth, PixelHeight = model.PixelHeight,
+        X = model.X, Y = model.Y, Width = model.Width, Height = model.Height, Scale = model.LayoutScale
+    };
+
+    static PixelRect Rect(ContainerSpot spot) => new(spot.PixelX, spot.PixelY,
+        Math.Max(1, spot.PixelWidth), Math.Max(1, spot.PixelHeight));
 
     static PixelRect ReadLive(ContainerWindow window)
     {
         var hwnd = new WindowInteropHelper(window).Handle;
         if (hwnd != IntPtr.Zero && NativeMethods.GetWindowRect(hwnd, out var rect))
+            return new PixelRect(rect.Left, rect.Top, Math.Max(1, rect.Right - rect.Left), Math.Max(1, rect.Bottom - rect.Top));
+        return new PixelRect(window.Model.PixelX, window.Model.PixelY,
+            Math.Max(1, window.Model.PixelWidth), Math.Max(1, window.Model.PixelHeight));
+    }
+
+    public static List<LayoutMonitor> Monitors() => System.Windows.Forms.Screen.AllScreens
+        .OrderBy(screen => screen.Bounds.Top).ThenBy(screen => screen.Bounds.Left)
+        .Select(screen => new LayoutMonitor
         {
-            return new PixelRect(rect.Left, rect.Top, Math.Max(0, rect.Right - rect.Left), Math.Max(0, rect.Bottom - rect.Top));
-        }
-        var model = window.Model;
-        var width = model.PixelWidth >= KnownSize ? model.PixelWidth : 440;
-        var height = model.PixelHeight >= KnownSize ? model.PixelHeight : 320;
-        if (model.HasPixelPosition)
-            return new PixelRect(model.PixelX, model.PixelY, width, height);
-        return new PixelRect((int)Math.Round(model.X), (int)Math.Round(model.Y), width, height);
-    }
+            Device = screen.DeviceName, Primary = screen.Primary,
+            Dpi = MonitorDpi(screen.Bounds.Left, screen.Bounds.Top),
+            X = screen.Bounds.Left, Y = screen.Bounds.Top,
+            Width = screen.Bounds.Width, Height = screen.Bounds.Height
+        }).ToList();
 
-    static PixelRect[] WorkAreas()
+    static PixelRect[] WorkAreas() => System.Windows.Forms.Screen.AllScreens
+        .Select(screen => screen.WorkingArea).Where(area => area.Width > 0 && area.Height > 0)
+        .Select(area => new PixelRect(area.Left, area.Top, area.Width, area.Height)).ToArray();
+
+    static string TopologyKey() => string.Join("|", Monitors().Select(monitor => string.Format(
+        CultureInfo.InvariantCulture, "{0}{1},{2},{3}x{4}@{5}", monitor.Primary ? "P" : "S",
+        monitor.X, monitor.Y, monitor.Width, monitor.Height, monitor.Dpi)));
+
+    static uint MonitorDpi(int x, int y)
     {
-        return System.Windows.Forms.Screen.AllScreens
-            .Select(screen => screen.WorkingArea)
-            .Where(area => area.Width > 0 && area.Height > 0)
-            .OrderBy(area => area.Top)
-            .ThenBy(area => area.Left)
-            .Select(area => new PixelRect(area.Left, area.Top, area.Width, area.Height))
-            .ToArray();
+        var monitor = NativeMethods.MonitorFromPoint(new NativeMethods.POINT { X = x, Y = y }, 2);
+        return NativeMethods.GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 && dpi >= 48 ? dpi : 96;
     }
-
-    static string TopologyKey()
-    {
-        var parts = System.Windows.Forms.Screen.AllScreens
-            .OrderBy(screen => screen.Bounds.Top)
-            .ThenBy(screen => screen.Bounds.Left)
-            .ThenBy(screen => screen.DeviceName ?? "", StringComparer.OrdinalIgnoreCase)
-            .Select(screen =>
-            {
-                var bounds = screen.Bounds;
-                var tag = screen.Primary ? "P" : "S";
-                return string.Format(
-                    CultureInfo.InvariantCulture,
-                    "{0}{1},{2},{3}x{4}",
-                    tag,
-                    bounds.Left,
-                    bounds.Top,
-                    bounds.Width,
-                    bounds.Height);
-            });
-        return string.Join("|", parts);
-    }
-
-    static bool Known(ContainerSpot? spot) =>
-        spot != null && spot.PixelWidth >= KnownSize && spot.PixelHeight >= KnownSize;
-
-    static bool Near(PixelRect fitted, ContainerSpot spot) =>
-        Math.Abs(fitted.W - spot.PixelWidth) <= SizeSlack && Math.Abs(fitted.H - spot.PixelHeight) <= SizeSlack;
 }
