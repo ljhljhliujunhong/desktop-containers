@@ -8,6 +8,7 @@ namespace DesktopContainers;
 public static class AppHost
 {
     static readonly List<ContainerWindow> _windows = new();
+    static DispatcherTimer? _shortcutTimer;
 
     public static LayoutStore Store { get; internal set; } = null!;
     public static AppState State { get; internal set; } = null!;
@@ -107,6 +108,7 @@ public static class AppHost
             OpenContainer(container, false);
 
         DisplayMemory.RestoreStartup();
+        StartShortcutMonitor();
 
         Tray = new TrayController();
         BrandIcon.SaveCanonical();
@@ -180,6 +182,7 @@ public static class AppHost
     {
         if (IsExiting) return;
         IsExiting = true;
+        _shortcutTimer?.Stop();
         DesktopPlacement.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettings;
         SystemEvents.SessionEnding -= OnSessionEnding;
@@ -194,6 +197,22 @@ public static class AppHost
     }
 
     static void OnDisplaySettings(object? sender, EventArgs e) => DisplayMemory.OnDisplayChanged();
+
+    internal static void StartShortcutMonitor(TimeSpan? interval = null)
+    {
+        _shortcutTimer?.Stop();
+        _shortcutTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = interval ?? TimeSpan.FromSeconds(10)
+        };
+        _shortcutTimer.Tick += (_, _) =>
+        {
+            if (IsExiting || DragSession.Current != null || _windows.Any(window => window.IsGesture)) return;
+            try { State.Reconcile(); }
+            catch (Exception ex) { Log.Error("shortcut reconcile", ex); }
+        };
+        _shortcutTimer.Start();
+    }
 
     static void RunReflowCheck()
     {

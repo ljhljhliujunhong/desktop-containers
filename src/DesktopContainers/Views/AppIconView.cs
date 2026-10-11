@@ -24,6 +24,7 @@ public sealed class AppIconView : StackPanel
         ToolTip = entry.DisplayName;
         Width = size + 28;
         Margin = new Thickness(model.Appearance.IconGap / 2);
+        Background = Brushes.Transparent;
 
         var host = new Grid
         {
@@ -87,7 +88,10 @@ public sealed class AppIconView : StackPanel
         host.MouseEnter += (_, _) => Motion.Scale(scale, 1.06, AppHost.State.Settings.AnimationsEnabled);
         host.MouseLeave += (_, _) => Motion.Scale(scale, 1, AppHost.State.Settings.AnimationsEnabled);
 
-        ContextMenuOpening += (_, _) => ContextMenu = BuildMenu();
+        // WPF selects the menu owner before ContextMenuOpening is raised.
+        ContextMenu = new ContextMenu();
+        FillMenu();
+        ContextMenuOpening += (_, _) => FillMenu();
         Loaded += (_, _) => LoadIcon();
     }
 
@@ -112,18 +116,18 @@ public sealed class AppIconView : StackPanel
         });
     }
 
-    ContextMenu BuildMenu()
+    void FillMenu()
     {
-        var menu = new ContextMenu();
+        var menu = ContextMenu;
+        menu.Items.Clear();
         menu.Items.Add(Item("打开", Launch));
         if (_entry.Missing && !_model.Locked)
             menu.Items.Add(Item("移除", () => AppHost.State.RemoveMissing(_model, _entry)));
         else if (!_model.Locked)
             menu.Items.Add(Item("移出到桌面", Restore));
-        if (!string.IsNullOrWhiteSpace(_entry.TargetPath) &&
+        if (!string.IsNullOrWhiteSpace(_entry.TargetPath) && !_entry.TargetPath.StartsWith(@"\\", StringComparison.Ordinal) &&
             (File.Exists(_entry.TargetPath) || Directory.Exists(_entry.TargetPath)))
             menu.Items.Add(Item("打开所在位置", () => AppHost.Shortcuts.Reveal(_entry)));
-        return menu;
     }
 
     static MenuItem Item(string text, Action action)

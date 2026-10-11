@@ -30,6 +30,7 @@ public static class SmokeTest
             AppHost.State = AppState.Load(AppHost.Store);
             AppHost.Shortcuts = new ShortcutService(AppHost.DataRoot);
             AppHost.Icons = new IconService();
+            ShortcutChecks.CheckCleanup();
             DesktopPlacement.Install();
 
             var container = AppHost.State.CreateContainer("AI 应用", "strawberry-milk", false);
@@ -97,6 +98,8 @@ public static class SmokeTest
                 try
                 {
                     CopyScreen(window, Path.Combine(AppHost.DataRoot, "container-screen.png"));
+                    await ShortcutChecks.CheckMenus(window);
+                    await ShortcutChecks.CheckMonitor();
                     await CheckLayering(window);
                     await LayoutChecks.CheckWindows();
                     window = AppHost.FindWindow(container.Id)!;
@@ -129,6 +132,9 @@ public static class SmokeTest
                         "above=" + above,
                         "layering=ok",
                         "layouts=ok",
+                        "shortcutCleanup=ok",
+                        "shortcutMonitor=ok",
+                        "contextMenus=ok",
                         "icon=" + iconOk,
                         "stored=" + stored,
                         "backupRestore=" + backupOk,

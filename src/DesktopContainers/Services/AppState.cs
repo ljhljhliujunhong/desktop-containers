@@ -9,6 +9,8 @@ public sealed class AppState
 {
     readonly LayoutStore _store;
     DispatcherTimer? _saveTimer;
+    readonly Dictionary<AppEntry, DateTime> _missingSince = new();
+    internal static readonly TimeSpan MissingTargetGrace = TimeSpan.FromSeconds(30);
 
     public AppState(LayoutStore store, LayoutDocument document)
     {
@@ -25,20 +27,54 @@ public sealed class AppState
     public ContainerModel? Find(string? id) =>
         string.IsNullOrWhiteSpace(id) ? null : Document.Containers.FirstOrDefault(container => container.Id == id);
 
-    public void Reconcile()
+    public void Reconcile() => Reconcile(DateTime.UtcNow);
+
+    internal void Reconcile(DateTime utcNow)
     {
         var changed = false;
+        var changedContainers = new HashSet<ContainerModel>();
+        var removed = new List<AppEntry>();
+        var present = new HashSet<AppEntry>();
         foreach (var container in Document.Containers)
         {
-            foreach (var app in container.Apps)
+            foreach (var app in container.Apps.ToList())
             {
+                present.Add(app);
                 var missing = ShortcutService.IsMissingTarget(app.TargetPath, AppHost.Shortcuts.PathOf(app));
-                if (app.Missing == missing) continue;
-                app.Missing = missing;
+                if (app.Missing != missing)
+                {
+                    app.Missing = missing;
+                    changedContainers.Add(container);
+                    changed = true;
+                }
+                if (!missing || !AppHost.Shortcuts.CanRemoveMissing(app))
+                {
+                    _missingSince.Remove(app);
+                    continue;
+                }
+                if (!_missingSince.TryGetValue(app, out var since))
+                {
+                    _missingSince[app] = utcNow;
+                    continue;
+                }
+                if (utcNow - since < MissingTargetGrace) continue;
+                // Locking only prevents manual edits; uninstall cleanup still applies.
+                container.Apps.Remove(app);
+                container.UpdatedUtc = utcNow;
+                removed.Add(app);
+                changedContainers.Add(container);
+                _missingSince.Remove(app);
                 changed = true;
             }
         }
-        if (changed) Flush();
+        foreach (var stale in _missingSince.Keys.Where(app => !present.Contains(app)).ToList())
+            _missingSince.Remove(stale);
+        if (!changed) return;
+        Flush();
+        foreach (var app in removed)
+            AppHost.Shortcuts.DeleteOwned(app);
+        foreach (var container in changedContainers)
+            AppHost.FindWindow(container.Id)?.RefreshLayout();
     }
 
     public ContainerModel CreateContainer(string name, string? themeId, bool placeOnCursor) =>

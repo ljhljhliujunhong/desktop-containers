@@ -179,7 +179,11 @@ public sealed class ContainerWindow : Window
         overlay.Children.Add(_grip);
         _card.Child = overlay;
         _card.ContextMenu = _menu;
-        _card.ContextMenuOpening += (_, _) => FillMenu();
+        _card.ContextMenuOpening += (_, e) =>
+        {
+            if (!IsUnder(typeof(AppIconView), e.OriginalSource as DependencyObject))
+                FillMenu();
+        };
         _card.MouseEnter += (_, _) => { _hover = true; ApplyChrome(); };
         _card.MouseLeave += (_, _) => { _hover = false; ApplyChrome(); };
 

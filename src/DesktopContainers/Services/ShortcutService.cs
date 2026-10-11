@@ -30,8 +30,49 @@ public sealed class ShortcutService
         if (!File.Exists(storedPath)) return true;
         if (string.IsNullOrWhiteSpace(target)) return false;
         if (target.Contains("://", StringComparison.Ordinal)) return false;
+        // Avoid synchronous network probes on the UI thread. An unreachable share
+        // is not evidence that the application was uninstalled.
+        if (target.StartsWith(@"\\", StringComparison.Ordinal)) return false;
         if (File.Exists(target) || Directory.Exists(target)) return false;
         return target.Contains('\\') || target.Contains('/');
+    }
+
+    public bool CanRemoveMissing(AppEntry entry)
+    {
+        if (!LayoutStore.SafeShortcutName(entry.FileName)) return false;
+        var stored = PathOf(entry);
+        if (!Owned(stored)) return false;
+        if (ConfirmedMissingLocalPath(stored)) return true;
+        return ConfirmedMissingLocalPath(entry.TargetPath);
+    }
+
+    // File.Exists also returns false on access errors and offline drives. Only a
+    // confirmed absent path on an available local drive is safe to auto-remove.
+    static bool ConfirmedMissingLocalPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Contains("://", StringComparison.Ordinal)
+            || !Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal))
+            return false;
+        try
+        {
+            var root = Path.GetPathRoot(path);
+            if (string.IsNullOrEmpty(root)) return false;
+            var drive = new DriveInfo(root);
+            if (!drive.IsReady || drive.DriveType == DriveType.Network) return false;
+            _ = File.GetAttributes(root);
+            try
+            {
+                _ = File.GetAttributes(path);
+                return false;
+            }
+            catch (FileNotFoundException) { return true; }
+            catch (DirectoryNotFoundException) { return true; }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                   or NotSupportedException or System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     public ImportOne Import(string sourcePath)
